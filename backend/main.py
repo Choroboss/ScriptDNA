@@ -6,6 +6,29 @@ import re
 import urllib.request
 import json
 import requests
+import sqlite3
+import hashlib
+
+DATABASE = "backend/users.db"
+
+def init_db():
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            tier TEXT DEFAULT 'PRO WRITER',
+            avatar_url TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+# Initialize SQLite database
+init_db()
 
 app = FastAPI(title="ScriptDNA API", version="1.0.0")
 
@@ -33,7 +56,19 @@ class ScriptGenerateRequest(BaseModel):
     prompt: str
     ai_voice_profile: VoiceProfileSchema = None
 
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
 # --- Helpers ---
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def extract_youtube_video_id(url: str) -> str:
     pattern = r'(?:v=|\/shorts\/|\/embed\/|\/v\/|youtu\.be\/|\/watch\?v=|\/watch\?.+&v=)([^#\&\?]{11})'
@@ -64,6 +99,76 @@ def fetch_youtube_video_title(video_id: str) -> str:
 def read_root():
     return {"status": "ok", "service": "ScriptDNA Backend API"}
 
+@app.post("/api/v1/auth/register")
+async def register(payload: RegisterRequest):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    # Check if user already exists
+    cursor.execute("SELECT id FROM users WHERE email = ?", (payload.email.strip().lower(),))
+    if cursor.fetchone():
+        conn.close()
+        raise HTTPException(status_code=400, detail="An account with this email already exists.")
+        
+    hashed_pwd = hash_password(payload.password)
+    # Premium Google-esque avatar URL
+    avatar = "https://lh3.googleusercontent.com/aida-public/AB6AXuDZ6DXquEzAVruY9pQ1fZcJdUIMbBmLcdGyd_2RwR6-Dwsm8m-lXrOTdjHi4lVsrNdyXQk3bjEvAALIUztnloa6U5HrGW3-q8nC-ZdcyD0_OpG61J4PKZHQC5kRXoTQHtEyzBz2ASU-utqQbBlenEEK8qh_Szhny_gx2hLCccszmAoGuve-koZoHhcBlIAD5ObWPpPe4aQJnWoywryetbqUQ_gP3-AwS5JoZqQ_6to5IJr82u7vS6vFn-9V73h05Kgqi-z4LxlC0g"
+    
+    try:
+        cursor.execute(
+            "INSERT INTO users (name, email, password, tier, avatar_url) VALUES (?, ?, ?, ?, ?)",
+            (payload.name.strip(), payload.email.strip().lower(), hashed_pwd, "BYOK LICENSE", avatar)
+        )
+        conn.commit()
+        
+        cursor.execute("SELECT name, email, tier, avatar_url FROM users WHERE email = ?", (payload.email.strip().lower(),))
+        user = cursor.fetchone()
+        conn.close()
+        
+        return {
+            "success": True,
+            "user": {
+                "name": user[0],
+                "email": user[1],
+                "tier": user[2],
+                "avatarUrl": user[3]
+            }
+        }
+    except Exception as e:
+        conn.close()
+        raise HTTPException(status_code=500, detail=f"Database registration failure: {str(e)}")
+
+@app.post("/api/v1/auth/login")
+async def login(payload: LoginRequest):
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    
+    cursor.execute(
+        "SELECT name, email, password, tier, avatar_url FROM users WHERE email = ?",
+        (payload.email.strip().lower(),)
+    )
+    user = cursor.fetchone()
+    conn.close()
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+        
+    stored_hash = user[2]
+    input_hash = hash_password(payload.password)
+    
+    if stored_hash != input_hash:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+        
+    return {
+        "success": True,
+        "user": {
+            "name": user[0],
+            "email": user[1],
+            "tier": user[3],
+            "avatarUrl": user[4]
+        }
+    }
+
 @app.post("/api/v1/training/ingest-youtube")
 async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
     video_id = extract_youtube_video_id(payload.url)
@@ -75,11 +180,9 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
     
     title = fetch_youtube_video_title(video_id)
     
-    # Read Gemini key from headers
     gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
     
     try:
-        # Retrieve transcript with Spanish ('es') preference, falling back to English ('en')
         transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['es', 'en'])
         full_text = " ".join([item['text'] for item in transcript_list])
         word_count = len(full_text.split())
@@ -93,7 +196,6 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         seconds = int(duration_sec % 60)
         duration_str = f"{minutes}:{seconds:02d} mins transcribed" if duration_sec > 0 else f"{word_count:,} words transcribed"
 
-        # Execute Gemini analysis if key is available
         analysis = None
         if gemini_key:
             try:
@@ -107,7 +209,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
                 5. Confidence level of your analysis (0-100).
                 
                 Transcript:
-                {full_text[:4000]}  # limit text length for safety
+                {full_text[:4000]}
                 """
 
                 gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={gemini_key}"
@@ -151,7 +253,6 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
             except Exception as gem_ex:
                 print(f"Gemini API analysis failed: {gem_ex}")
         
-        # Default fallback mock analysis if Gemini key was missing or request failed
         if not analysis:
             analysis = {
                 "linguistic_pacing": "Punchy & Fast-Paced",
@@ -189,10 +290,8 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
 
 @app.post("/api/v1/scripts/generate")
 async def generate_script(payload: ScriptGenerateRequest, request: Request):
-    # Read Gemini key from headers
     gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
     
-    # Load voice profile parameters
     pacing_desc = "Punchy & Fast-Paced"
     catchphrases = ["Socio", "Uff", "Brutal", "Literal"]
     if payload.ai_voice_profile:
@@ -266,7 +365,6 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
         except Exception as gem_ex:
             print(f"Gemini script generation failed: {gem_ex}")
             
-    # Mock fallback if Gemini key was missing or request failed
     if not generated_json:
         generated_json = {
             "title": f"The Rise and Fall of Dreamcast ({payload.prompt[:25]})",

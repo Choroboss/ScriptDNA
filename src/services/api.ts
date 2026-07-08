@@ -187,3 +187,28 @@ export async function generateScript(
   });
   return response.data;
 }
+
+export interface UserDetails {
+  name: string;
+  email: string;
+  tier: string;
+  avatarUrl: string;
+}
+
+/**
+ * Validates credentials on the backend.
+ * POST /api/v1/auth/login
+ */
+export async function loginUser(email: string, password: string): Promise<{ success: boolean; user: UserDetails }> {
+  const response = await apiClient.post('/auth/login', { email, password });
+  return response.data;
+}
+
+/**
+ * Registers a new creator profile.
+ * POST /api/v1/auth/register
+ */
+export async function registerUser(name: string, email: string, password: string): Promise<{ success: boolean; user: UserDetails }> {
+  const response = await apiClient.post('/auth/register', { name, email, password });
+  return response.data;
+}

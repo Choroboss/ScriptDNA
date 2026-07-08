@@ -50,10 +50,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* CTA: New Script */}
       <button 
-        onClick={onNewScript}
-        className="w-full bg-primary text-on-primary font-label-md text-label-md py-2.5 rounded flex items-center justify-center gap-2 hover:bg-primary-fixed transition-colors mt-2 btn-interact"
+        onClick={() => {
+          if (!auth.user) {
+            onOpenAuthModal();
+          } else {
+            onNewScript();
+          }
+        }}
+        className="w-full bg-primary text-on-primary font-label-md text-label-md py-2.5 rounded flex items-center justify-center gap-2 hover:bg-primary-fixed transition-colors mt-2 btn-interact cursor-pointer"
       >
-        <span className="material-symbols-outlined text-[18px]">add</span>
+        <span className="material-symbols-outlined text-[18px]">{auth.user ? 'add' : 'lock'}</span>
         New Script
       </button>
 
@@ -61,11 +67,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-grow space-y-1 mt-4">
         {navItems.map((item) => {
           const isActive = activeView === item.id;
+          const isRestricted = !auth.user && (item.id === 'style-ai-training' || item.id === 'settings');
           return (
             <button
               key={item.id}
-              onClick={() => setActiveView(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2 transition-all rounded-lg group ${
+              onClick={() => {
+                if (isRestricted) {
+                  onOpenAuthModal();
+                } else {
+                  setActiveView(item.id);
+                }
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2 transition-all rounded-lg group cursor-pointer ${
                 isActive
                   ? 'text-primary bg-secondary-container font-semibold'
                   : 'text-on-surface-variant hover:bg-surface-container-high hover:text-white'
@@ -80,6 +93,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 {item.icon}
               </span>
               <span className="font-body-md text-body-md">{item.label}</span>
+              {isRestricted && (
+                <span className="material-symbols-outlined text-[16px] ml-auto text-outline-variant group-hover:text-white transition-colors">lock</span>
+              )}
             </button>
           );
         })}

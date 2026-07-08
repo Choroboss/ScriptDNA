@@ -202,7 +202,13 @@ function App() {
           />
         )}
 
-        {activeView === 'my-scripts' && <MyScriptsView voiceProfile={voiceProfile} />}
+        {activeView === 'my-scripts' && (
+          <MyScriptsView 
+            voiceProfile={voiceProfile} 
+            isAuthenticated={!!auth.user}
+            onOpenAuthModal={() => setAuth((prev) => ({ ...prev, modalOpen: true }))}
+          />
+        )}
 
         {activeView === 'style-ai-training' && (
           <StyleAiTrainingView

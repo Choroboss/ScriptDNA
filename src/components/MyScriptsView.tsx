@@ -21,9 +21,11 @@ interface MyScriptsViewProps {
     words_per_minute: number;
     catchphrases: string[];
   };
+  isAuthenticated: boolean;
+  onOpenAuthModal: () => void;
 }
 
-export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile }) => {
+export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAuthenticated, onOpenAuthModal }) => {
   // Config state
   const [suspenseFreq, setSuspenseFreq] = useState(3);
   const [hookReminder, setHookReminder] = useState(true);
@@ -79,6 +81,14 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile }) =>
       alert(`AI Script generation failed: ${err?.message || 'Server error'}`);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleRetentionClick = (e: React.MouseEvent) => {
+    if (!isAuthenticated) {
+      e.preventDefault();
+      e.stopPropagation();
+      onOpenAuthModal();
     }
   };
 
@@ -201,24 +211,37 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile }) =>
 
         {/* AI Generation Prompt Input Panel */}
         <div className="border-b tech-border bg-surface-container-low px-6 py-4 flex gap-4 items-center">
-          <form onSubmit={handleGenerate} className="flex flex-1 gap-3">
-            <input 
-              type="text" 
-              className="flex-1 bg-surface-container-highest border border-outline-variant rounded px-4 py-2 text-body-md text-on-surface placeholder-on-surface-variant outline-none focus:border-indigo-accent transition-all focus:ring-0 text-white" 
-              placeholder="Enter a prompt to write a script (e.g. 'Write a script about Sega Dreamcast history')..."
-              value={promptText}
-              onChange={(e) => setPromptText(e.target.value)}
-              disabled={generating}
-            />
-            <button 
-              type="submit" 
-              disabled={generating}
-              className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">magic_button</span>
-              {generating ? 'AI Generating...' : 'Write Script'}
-            </button>
-          </form>
+          {isAuthenticated ? (
+            <form onSubmit={handleGenerate} className="flex flex-1 gap-3">
+              <input 
+                type="text" 
+                className="flex-1 bg-surface-container-highest border border-outline-variant rounded px-4 py-2 text-body-md text-on-surface placeholder-on-surface-variant outline-none focus:border-indigo-accent transition-all focus:ring-0 text-white" 
+                placeholder="Enter a prompt to write a script (e.g. 'Write a script about Sega Dreamcast history')..."
+                value={promptText}
+                onChange={(e) => setPromptText(e.target.value)}
+                disabled={generating}
+              />
+              <button 
+                type="submit" 
+                disabled={generating}
+                className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[18px]">magic_button</span>
+                {generating ? 'AI Generating...' : 'Write Script'}
+              </button>
+            </form>
+          ) : (
+            <div className="flex flex-1 justify-between items-center bg-surface-container-highest/20 p-2.5 rounded border border-dashed border-outline-variant/60">
+              <span className="text-body-md text-on-surface-variant italic">Viewing pre-loaded sample script ('The Rise and Fall of Dreamcast.md')</span>
+              <button 
+                onClick={onOpenAuthModal}
+                className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer text-xs"
+              >
+                <span className="material-symbols-outlined text-[16px]">lock</span>
+                Register to Generate Your Own Scripts
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Editor Layout with Gutter + Textarea */}
@@ -369,7 +392,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile }) =>
               <span className="font-label-md text-label-md uppercase tracking-wider">Retention Settings</span>
             </div>
           </div>
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4" onClickCapture={handleRetentionClick}>
             <div>
               <label className="font-label-sm text-label-sm text-on-surface-variant flex justify-between mb-2">
                 <span>Suspense Frequency</span>

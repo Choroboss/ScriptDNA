@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { loginUser, registerUser } from '../services/api';
 
 interface AuthModalProps {
   onClose: () => void;
@@ -7,8 +8,11 @@ interface AuthModalProps {
 
 export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess }) => {
   const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
   // Parallax tilt effect from Stitch script
@@ -27,15 +31,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
     };
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate login success with mock user details
-    onLoginSuccess({
-      name: 'Vicente Aguirre',
-      email: email || 'vicente@example.com',
-      tier: 'BYOK LICENSE',
-      avatarUrl: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDZ6DXquEzAVruY9pQ1fZcJdUIMbBmLcdGyd_2RwR6-Dwsm8m-lXrOTdjHi4lVsrNdyXQk3bjEvAALIUztnloa6U5HrGW3-q8nC-ZdcyD0_OpG61J4PKZHQC5kRXoTQHtEyzBz2ASU-utqQbBlenEEK8qh_Szhny_gx2hLCccszmAoGuve-koZoHhcBlIAD5ObWPpPe4aQJnWoywryetbqUQ_gP3-AwS5JoZqQ_6to5IJr82u7vS6vFn-9V73h05Kgqi-z4LxlC0g',
-    });
+    setError(null);
+    setLoading(true);
+    try {
+      if (activeTab === 'login') {
+        const res = await loginUser(email, password);
+        if (res.success && res.user) {
+          onLoginSuccess(res.user);
+        }
+      } else {
+        if (!name.trim()) {
+          setError('Name is required for registration.');
+          setLoading(false);
+          return;
+        }
+        const res = await registerUser(name.trim(), email, password);
+        if (res.success && res.user) {
+          onLoginSuccess(res.user);
+        }
+      }
+    } catch (err: any) {
+      console.error(err);
+      const detail = err?.response?.data?.detail || err?.message || 'Authentication failed.';
+      setError(detail);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSocialLogin = () => {
@@ -97,34 +120,57 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
           </div>
 
           {/* Form Inputs */}
+          {error && (
+            <div className="bg-red-950/40 border border-red-500/30 text-red-400 p-3 rounded-lg text-xs font-semibold text-center mb-4">
+              {error}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            {activeTab === 'register' && (
+              <div className="space-y-1">
+                <label className="font-label-sm uppercase tracking-widest text-on-surface-variant px-1">Full Name</label>
+                <input 
+                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600 focus:ring-0 text-white" 
+                  placeholder="Vicente Aguirre" 
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  disabled={loading}
+                />
+              </div>
+            )}
             <div className="space-y-1">
               <label className="font-label-sm uppercase tracking-widest text-on-surface-variant px-1">Email Address</label>
               <input 
-                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600 focus:ring-0" 
+                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600 focus:ring-0 text-white" 
                 placeholder="creator@scriptflow.ai" 
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
               />
             </div>
             <div className="space-y-1">
               <label className="font-label-sm uppercase tracking-widest text-on-surface-variant px-1">Password</label>
               <input 
-                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600 focus:ring-0" 
+                className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600 focus:ring-0 text-white" 
                 placeholder="••••••••" 
                 type="password"
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
               />
             </div>
             <button 
-              className="w-full bg-primary text-on-primary-container font-headline-sm py-4 rounded-xl mt-4 hover:opacity-90 transition-all btn-interact" 
+              className="w-full bg-primary text-on-primary-container font-headline-sm py-4 rounded-xl mt-4 hover:opacity-90 transition-all btn-interact disabled:opacity-50 cursor-pointer" 
               type="submit"
+              disabled={loading}
             >
-              Continue with Email
+              {loading ? 'Validating credentials...' : 'Continue with Email'}
             </button>
           </form>
 
