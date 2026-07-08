@@ -320,6 +320,15 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
 async def generate_script(payload: ScriptGenerateRequest, request: Request):
     gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
     
+    if gemini_key:
+        print(f"Active API Key Received: {gemini_key[:6]}...")
+    else:
+        print("Active API Key Received: None")
+        raise HTTPException(
+            status_code=400,
+            detail="Missing Gemini API Key. Please configure and save your API Key in Settings first."
+        )
+    
     pacing_desc = "Punchy & Fast-Paced"
     catchphrases = ["Socio", "Uff", "Brutal", "Literal"]
     if payload.ai_voice_profile:
@@ -328,113 +337,88 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
         
     catchphrases_str = ", ".join([f'"{c}"' for c in catchphrases])
     
-    generated_json = None
+    system_instruction = "You are a Linguistic Engineer and elite YouTube Scriptwriter. Your task is to write a highly engaging YouTube script based on the user's prompt, incorporating their unique style signatures (catchphrases, structural patterns, and pacing) naturally. You must also segment the script into blocks, identifying sections that have high viral retention potential to be extracted as standalone Shorts."
     
-    if gemini_key:
-        try:
-            system_instruction = "You are a Linguistic Engineer and elite YouTube Scriptwriter. Your task is to write a highly engaging YouTube script based on the user's prompt, incorporating their unique style signatures (catchphrases, structural patterns, and pacing) naturally. You must also segment the script into blocks, identifying sections that have high viral retention potential to be extracted as standalone Shorts."
-            
-            prompt_text = f"""
-            Write a YouTube script about: {payload.prompt}. 
-            
-            Linguistic style parameters:
-            - Pacing Style: {pacing_desc}
-            - Catchphrases to use naturally: {catchphrases_str}
-            
-            Split the generated script into 4 to 8 blocks. Identify 2 of them as high viral clip candidates.
-            Ensure you follow the strict output schema containing the title, estimated_duration_mins, and blocks.
-            """
-            
-            schema = {
-                "type": "OBJECT",
-                "properties": {
-                    "title": {"type": "STRING"},
-                    "estimated_duration_mins": {"type": "NUMBER"},
-                    "blocks": {
-                        "type": "ARRAY",
-                        "items": {
+    prompt_text = f"""
+    Write a YouTube script about: {payload.prompt}. 
+    
+    Linguistic style parameters:
+    - Pacing Style: {pacing_desc}
+    - Catchphrases to use naturally: {catchphrases_str}
+    
+    Split the generated script into 4 to 8 blocks. Identify 2 of them as high viral clip candidates.
+    Ensure you follow the strict output schema containing the title, estimated_duration_mins, and blocks.
+    """
+    
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "title": {"type": "STRING"},
+            "estimated_duration_mins": {"type": "NUMBER"},
+            "blocks": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "text": {"type": "STRING"},
+                        "is_viral_candidate": {"type": "BOOLEAN"},
+                        "clip_metadata": {
                             "type": "OBJECT",
                             "properties": {
-                                "text": {"type": "STRING"},
-                                "is_viral_candidate": {"type": "BOOLEAN"},
-                                "clip_metadata": {
-                                    "type": "OBJECT",
-                                    "properties": {
-                                        "short_title": {"type": "STRING"},
-                                        "duration_shorts": {"type": "STRING"},
-                                        "suggested_hook": {"type": "STRING"}
-                                    },
-                                    "required": ["short_title", "duration_shorts", "suggested_hook"]
-                                }
+                                "short_title": {"type": "STRING"},
+                                "duration_shorts": {"type": "STRING"},
+                                "suggested_hook": {"type": "STRING"}
                             },
-                            "required": ["text", "is_viral_candidate"]
+                            "required": ["short_title", "duration_shorts", "suggested_hook"]
                         }
-                    }
-                },
-                "required": ["title", "estimated_duration_mins", "blocks"]
-            }
-
-            gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={gemini_key}"
-            gemini_payload = {
-                "contents": [{"parts": [{"text": prompt_text}]}],
-                "systemInstruction": {"parts": [{"text": system_instruction}]},
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "responseSchema": schema
+                    },
+                    "required": ["text", "is_viral_candidate"]
                 }
             }
-            
-            res = requests.post(gemini_url, json=gemini_payload, timeout=20)
-            if res.status_code == 200:
-                candidates = res.json().get("candidates", [])
-                if candidates:
-                    text_out = candidates[0]["content"]["parts"][0]["text"]
-                    generated_json = json.loads(text_out)
-        except Exception as gem_ex:
-            print(f"Gemini script generation failed: {gem_ex}")
-            
-    if not generated_json:
-        generated_json = {
-            "title": f"The Rise and Fall of Dreamcast ({payload.prompt[:25]})",
-            "estimated_duration_mins": 12.45,
-            "blocks": [
-                {
-                    "text": "[0:00] INT. NEON-LIT STUDIO - NIGHT\n\nThe year is 1999. Sega is about to make the biggest gamble in gaming history. They called it the Dreamcast. Socio, this machine was ahead of its time, but a storm named PlayStation 2 was brewing on the horizon.",
-                    "is_viral_candidate": False
-                },
-                {
-                    "text": "[0:45] Ever wonder why the best console failed? Sega made one fatal error. They created the perfect machine for the future, but forgot they had to sell it in the present. They built the bridge to online gaming, but PlayStation 2 promised to play DVDs. And in 2000? A DVD player was worth its weight in gold. Literal madness. The Dreamcast brought a modem to a movie fight.",
-                    "is_viral_candidate": True,
-                    "clip_metadata": {
-                        "short_title": "The Fatal Error Sega Made",
-                        "duration_shorts": "0:45s",
-                        "suggested_hook": "This one mistake killed Sega forever..."
-                    }
-                },
-                {
-                    "text": "Let's back up to the Japanese launch. The initial stock shortages weren't a marketing ploy; they were a catastrophic manufacturing bottleneck with the PowerVR2 chip. Uff, Sega was bleeding cash.",
-                    "is_viral_candidate": False
-                },
-                {
-                    "text": "[2:15] The date every gamer remembers: September 9, 1999. 9-9-99. The American launch was a masterclass in hype. They sold over 225,000 units in 24 hours, making $98 million. It was the biggest 24 hours in entertainment retail history. Brutal. But the hype couldn't save them from Tokyo's structural debt.",
-                    "is_viral_candidate": True,
-                    "clip_metadata": {
-                        "short_title": "9-9-99: The Launch Day",
-                        "duration_shorts": "0:38s",
-                        "suggested_hook": "The biggest 24 hours in gaming history..."
-                    }
-                },
-                {
-                    "text": "Shenmue, arguably the crown jewel of the system, cost a staggering $47 million to produce. Yu Suzuki's masterpiece was pushing boundaries that wouldn't become standard for another decade. Insane pacing, but a massive anchor.",
-                    "is_viral_candidate": False
-                }
-            ]
-        }
-        
-    return {
-        "success": True,
-        "script": generated_json
+        },
+        "required": ["title", "estimated_duration_mins", "blocks"]
     }
+
+    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={gemini_key}"
+    gemini_payload = {
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": schema
+        }
+    }
+    
+    try:
+        res = requests.post(gemini_url, json=gemini_payload, timeout=30)
+        if res.status_code != 200:
+            raise HTTPException(
+                status_code=res.status_code,
+                detail=f"Gemini API returned an error ({res.status_code}): {res.text}"
+            )
+        
+        candidates = res.json().get("candidates", [])
+        if not candidates:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API returned an empty candidate list. No script could be generated."
+            )
+            
+        text_out = candidates[0]["content"]["parts"][0]["text"]
+        generated_json = json.loads(text_out)
+        
+        return {
+            "success": True,
+            "script": generated_json
+        }
+    except Exception as gem_ex:
+        print(f"Gemini script generation failed: {gem_ex}")
+        if isinstance(gem_ex, HTTPException):
+            raise gem_ex
+        raise HTTPException(
+            status_code=500,
+            detail=f"Linguistic script writer failed: {str(gem_ex)}"
+        )
 
 # Mock upload route
 @app.post("/api/v1/training/upload-file")
