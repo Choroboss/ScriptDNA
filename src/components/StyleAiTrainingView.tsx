@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { uploadScriptFile, ingestYouTubeUrl } from '../services/api';
+import React, { useState, useRef, useEffect } from 'react';
+import { uploadScriptFile, ingestYouTubeUrl, fetchVoiceProfile } from '../services/api';
 import type { TrainingSource } from '../services/api';
 
 interface StyleAiTrainingViewProps {
@@ -9,6 +9,7 @@ interface StyleAiTrainingViewProps {
   onAddSource: (source: TrainingSource) => void;
   onUpdateSource: (id: string, updates: Partial<TrainingSource>) => void;
   onUpdateVoiceProfile: (pacing: string, wpm: number, catchphrases: string[]) => void;
+  onRefreshVoiceProfile?: () => void;
 }
 
 export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
@@ -18,6 +19,7 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
   onAddSource,
   onUpdateSource,
   onUpdateVoiceProfile,
+  onRefreshVoiceProfile,
 }) => {
   // Local uploader and fetch inputs states
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -32,7 +34,7 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
 
   // Voice Profile dynamic states
   const [pacingDescription, setPacingDescription] = useState('Punchy & Fast-Paced');
-  const [pacingDetail, setPacingDetail] = useState('Your content clusters around 160-180 WPM with high dynamic range in volume.');
+  const [pacingDetail, setPacingDetail] = useState('Your content clusters around 160-180 WPM.');
   const [wpm, setWpm] = useState(170);
   const [confidence, setConfidence] = useState(94);
   const [structuralPatterns, setStructuralPatterns] = useState([
@@ -40,6 +42,36 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
     { id: 'pat-2', text: 'Retention peaks every 2.5 mins (Visual B-Roll pattern).', completed: true },
     { id: 'pat-3', text: 'Outro Call-to-Action pattern identified.', completed: false },
   ]);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      if (isAuthenticated) {
+        try {
+          const profile = await fetchVoiceProfile();
+          setPacingDescription(profile.pacing.description);
+          setPacingDetail(`Your content clusters around ${profile.pacing.wpm} WPM.`);
+          setWpm(profile.pacing.raw_wpm || 170);
+          setTags(profile.catchphrases.map((c: string) => c.startsWith('"') ? c : `"${c}"`));
+          setConfidence(profile.confidenceLevel);
+          setStructuralPatterns(profile.structuralPatterns);
+        } catch (err) {
+          console.error('Failed to load voice profile on mount:', err);
+        }
+      } else {
+        setPacingDescription('Punchy & Fast-Paced');
+        setPacingDetail('Your content clusters around 160-180 WPM.');
+        setWpm(170);
+        setTags(['"Socio"', '"Uff"', '"Literal"', '"Brutal"', '"Actually"', '"Insane"']);
+        setConfidence(94);
+        setStructuralPatterns([
+          { id: 'pat-1', text: 'Hooks within first 15s consistently identified.', completed: true },
+          { id: 'pat-2', text: 'Retention peaks every 2.5 mins (Visual B-Roll pattern).', completed: true },
+          { id: 'pat-3', text: 'Outro Call-to-Action pattern identified.', completed: false },
+        ]);
+      }
+    };
+    loadProfile();
+  }, [isAuthenticated]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -144,6 +176,7 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
           ]);
           // Sync changes to global state
           onUpdateVoiceProfile(ana.linguistic_pacing, ana.words_per_minute, ana.catchphrases);
+          onRefreshVoiceProfile?.();
         }
       }
     } catch (err: any) {

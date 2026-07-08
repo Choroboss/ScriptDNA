@@ -27,6 +27,17 @@ def init_db():
             avatar_url TEXT
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS voice_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_email TEXT UNIQUE NOT NULL,
+            linguistic_pacing TEXT DEFAULT 'Punchy & Fast-Paced',
+            words_per_minute INTEGER DEFAULT 170,
+            catchphrases TEXT DEFAULT 'Socio,Uff,Literal,Brutal,Actually,Insane',
+            structural_patterns TEXT DEFAULT '[]',
+            confidence_level INTEGER DEFAULT 94
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -137,6 +148,10 @@ async def register(payload: RegisterRequest):
         cursor.execute(
             "INSERT INTO users (name, email, password, tier, avatar_url) VALUES (?, ?, ?, ?, ?)",
             (payload.name.strip(), payload.email.strip().lower(), hashed_pwd, "BYOK LICENSE", avatar)
+        )
+        cursor.execute(
+            "INSERT INTO voice_profiles (user_email) VALUES (?)",
+            (payload.email.strip().lower(),)
         )
         conn.commit()
         
@@ -346,7 +361,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
             analysis["words_per_minute"] = calculated_wpm
             analysis["catchphrases"] = top_keywords
             
-        # 4. Update the global profile state
+        # 4. Update the global profile state and SQLite DB
         USER_VOICE_PROFILE["catchphrases"] = top_keywords
         USER_VOICE_PROFILE["pacing"]["raw_wpm"] = calculated_wpm
         USER_VOICE_PROFILE["pacing"]["wpm"] = f"{calculated_wpm - 10}-{calculated_wpm + 10}"
@@ -354,11 +369,42 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         USER_VOICE_PROFILE["confidenceLevel"] = analysis.get("confidence_level", 94)
         
         peak_val = analysis.get("structural_patterns", {}).get("retention_peak_interval_mins", 2.5)
-        USER_VOICE_PROFILE["structuralPatterns"] = [
-            {"id": "pat-1", "text": "Hooks within first 15s consistently identified.", "completed": analysis.get("structural_patterns", {}).get("has_early_hooks", True)},
+        struct_patterns_list = [
+            {"id": "pat-1", "text": "Hooks within first 15s consistently identified.", "completed": bool(analysis.get("structural_patterns", {}).get("has_early_hooks", True))},
             {"id": "pat-2", "text": f"Retention peaks every {peak_val} mins (Visual B-Roll pattern).", "completed": True},
             {"id": "pat-3", "text": f"Outro style: {analysis.get('structural_patterns', {}).get('outro_style', 'Short CTA with custom catchphrase')}", "completed": True}
         ]
+        USER_VOICE_PROFILE["structuralPatterns"] = struct_patterns_list
+        
+        user_email = request.headers.get("X-User-Email")
+        if user_email:
+            try:
+                conn = sqlite3.connect(DATABASE)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO voice_profiles (user_email, linguistic_pacing, words_per_minute, catchphrases, structural_patterns, confidence_level)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_email) DO UPDATE SET
+                        linguistic_pacing=excluded.linguistic_pacing,
+                        words_per_minute=excluded.words_per_minute,
+                        catchphrases=excluded.catchphrases,
+                        structural_patterns=excluded.structural_patterns,
+                        confidence_level=excluded.confidence_level
+                    """,
+                    (
+                        user_email.strip().lower(),
+                        analysis.get("linguistic_pacing", "Punchy & Fast-Paced"),
+                        calculated_wpm,
+                        ",".join(top_keywords),
+                        json.dumps(struct_patterns_list),
+                        analysis.get("confidence_level", 94)
+                    )
+                )
+                conn.commit()
+                conn.close()
+            except Exception as db_err:
+                print(f"Failed to save user voice profile to database: {db_err}")
 
         return {
             "success": True,
@@ -530,3 +576,43 @@ async def upload_file():
 @app.get("/api/v1/profile/voice-dna")
 async def get_voice_dna():
     return USER_VOICE_PROFILE
+
+@app.get("/api/v1/profile/voice-profile")
+async def get_voice_profile(request: Request):
+    user_email = request.headers.get("X-User-Email")
+    if not user_email:
+        return USER_VOICE_PROFILE
+        
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT linguistic_pacing, words_per_minute, catchphrases, structural_patterns, confidence_level FROM voice_profiles WHERE user_email = ?",
+        (user_email.strip().lower(),)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    
+    if not row:
+        return USER_VOICE_PROFILE
+        
+    pacing_desc, wpm, catchphrases_str, struct_str, conf = row
+    catchphrases_list = [c.strip() for c in catchphrases_str.split(",") if c.strip()]
+    try:
+        struct_list = json.loads(struct_str)
+    except Exception:
+        struct_list = [
+            {"id": "pat-1", "text": "Hooks within first 15s consistently identified.", "completed": True},
+            {"id": "pat-2", "text": "Retention peaks every 2.5 mins (Visual B-Roll pattern).", "completed": True},
+            {"id": "pat-3", "text": "Outro Call-to-Action pattern identified.", "completed": False}
+        ]
+        
+    return {
+        "catchphrases": catchphrases_list,
+        "pacing": {
+            "wpm": f"{max(0, wpm-10)}-{wpm+10}" if wpm > 10 else "160-180",
+            "description": pacing_desc,
+            "raw_wpm": wpm
+        },
+        "structuralPatterns": struct_list,
+        "confidenceLevel": conf
+    }

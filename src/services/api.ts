@@ -7,6 +7,7 @@ export interface VoiceDNASignatures {
   pacing: {
     wpm: string;
     description: string;
+    raw_wpm?: number;
   };
   structuralPatterns: {
     id: string;
@@ -34,7 +35,7 @@ export const apiClient = axios.create({
   },
 });
 
-// Interceptor to add BYOK keys if available
+// Interceptor to add BYOK keys and active user session if available
 apiClient.interceptors.request.use((config) => {
   const keysJson = localStorage.getItem('scriptdna_api_keys');
   if (keysJson) {
@@ -51,10 +52,31 @@ apiClient.interceptors.request.use((config) => {
       console.error('Failed to decrypt local API keys', e);
     }
   }
+  
+  const userJson = localStorage.getItem('scriptdna_user');
+  if (userJson) {
+    try {
+      const user = JSON.parse(userJson);
+      if (user && user.email) {
+        config.headers['X-User-Email'] = user.email;
+      }
+    } catch (e) {
+      console.error('Failed to append X-User-Email header', e);
+    }
+  }
   return config;
 }, (error) => {
   return Promise.reject(error);
 });
+
+/**
+ * Fetches the user's computed voice signature profile from the database.
+ * GET /api/v1/profile/voice-profile
+ */
+export async function fetchVoiceProfile(): Promise<VoiceDNASignatures> {
+  const response = await apiClient.get('/profile/voice-profile');
+  return response.data;
+}
 
 /**
  * Uploads a text or docx script file to train the AI model.

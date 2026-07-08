@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { AuthModal } from './components/AuthModal';
 import { DashboardView } from './components/DashboardView';
 import { MyScriptsView } from './components/MyScriptsView';
 import { StyleAiTrainingView } from './components/StyleAiTrainingView';
 import { SettingsView } from './components/SettingsView';
+import { fetchVoiceProfile } from './services/api';
 import type { TrainingSource } from './services/api';
 
 // --- Local Storage BYOK Encrypted Wrapper ---
@@ -60,9 +61,12 @@ function App() {
       avatarUrl: string;
     } | null;
     modalOpen: boolean;
-  }>({
-    user: null, // Starts in Guest state
-    modalOpen: false,
+  }>(() => {
+    const saved = localStorage.getItem('scriptdna_user');
+    return {
+      user: saved ? JSON.parse(saved) : null,
+      modalOpen: false,
+    };
   });
 
   // API Keys state
@@ -74,6 +78,31 @@ function App() {
     words_per_minute: 170,
     catchphrases: ['Socio', 'Uff', 'Literal', 'Brutal', 'Actually', 'Insane'],
   });
+
+  const refreshVoiceProfile = async () => {
+    if (auth.user) {
+      try {
+        const profile = await fetchVoiceProfile();
+        setVoiceProfile({
+          linguistic_pacing: profile.pacing.description,
+          words_per_minute: profile.pacing.raw_wpm || 170,
+          catchphrases: profile.catchphrases,
+        });
+      } catch (err) {
+        console.error('Failed to fetch voice profile', err);
+      }
+    } else {
+      setVoiceProfile({
+        linguistic_pacing: 'Punchy & Fast-Paced',
+        words_per_minute: 170,
+        catchphrases: ['Socio', 'Uff', 'Literal', 'Brutal', 'Actually', 'Insane'],
+      });
+    }
+  };
+
+  useEffect(() => {
+    refreshVoiceProfile();
+  }, [auth.user]);
 
   // Training sources state (table data)
   const [sources, setSources] = useState<TrainingSource[]>([]);
@@ -90,6 +119,9 @@ function App() {
   };
 
   const handleLoginSuccess = (user: typeof auth.user) => {
+    if (user) {
+      localStorage.setItem('scriptdna_user', JSON.stringify(user));
+    }
     setAuth({
       user,
       modalOpen: false,
@@ -97,6 +129,7 @@ function App() {
   };
 
   const handleLogout = () => {
+    localStorage.removeItem('scriptdna_user');
     setAuth({
       user: null,
       modalOpen: false,
@@ -175,6 +208,7 @@ function App() {
             onUpdateVoiceProfile={(pacing, wpm, catchphrases) => 
               setVoiceProfile({ linguistic_pacing: pacing, words_per_minute: wpm, catchphrases })
             }
+            onRefreshVoiceProfile={refreshVoiceProfile}
           />
         )}
 
