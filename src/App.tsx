@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { AuthModal } from './components/AuthModal';
 import { DashboardView } from './components/DashboardView';
@@ -76,52 +76,7 @@ function App() {
   });
 
   // Training sources state (table data)
-  const [sources, setSources] = useState<TrainingSource[]>([
-    {
-      id: 'src-1',
-      name: 'Dreamcast_History_Script.docx',
-      type: 'file',
-      status: 'Indexed',
-      metrics: '2,400 words analyzed',
-      timestamp: '07/08/2026',
-    },
-    {
-      id: 'src-2',
-      name: 'YouTube Video: Retro Consoles Era',
-      type: 'youtube',
-      status: 'Indexed',
-      metrics: '14:20 mins transcribed',
-      timestamp: '07/08/2026',
-    },
-    {
-      id: 'src-3',
-      name: 'WWE_CM_Punk_Analysis.txt',
-      type: 'file',
-      status: 'Processing',
-      progress: 65,
-      metrics: 'Analyzing syntax...',
-      timestamp: '07/08/2026',
-    },
-  ]);
-
-  // Simulate progress on initial load for WWE_CM_Punk_Analysis.txt
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setSources((prev) =>
-        prev.map((s) =>
-          s.id === 'src-3'
-            ? {
-                ...s,
-                status: 'Indexed',
-                progress: undefined,
-                metrics: '1,842 words analyzed',
-              }
-            : s
-        )
-      );
-    }, 4000);
-    return () => clearTimeout(timer);
-  }, []);
+  const [sources, setSources] = useState<TrainingSource[]>([]);
 
   // Intercept navigation to Style AI Training if guest
   const handleSetView = (view: string) => {

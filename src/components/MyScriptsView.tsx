@@ -93,49 +93,59 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
   };
 
   // Script blocks state
-  const [blocks, setBlocks] = useState<ScriptBlock[]>([
-    {
-      id: 'b1',
-      type: 'paragraph',
-      text: '[0:00] INT. NEON-LIT STUDIO - NIGHT\n\nThe year is 1999. The internet is screaming through 56k modems, CD players are skipping in your pocket, and Sega is about to make the biggest gamble in gaming history.',
-    },
-    {
-      id: 'b2',
-      type: 'paragraph',
-      text: 'They called it the Dreamcast. It was beautiful. It was ahead of its time. It had an actual modem built into it before most homes even understood what broadband was.',
-    },
-    {
-      id: 'b3',
-      type: 'paragraph',
-      text: 'But the dream was fragile. And a storm named PlayStation 2 was already brewing on the horizon.',
-    },
-    {
-      id: 'b4',
-      type: 'clip',
-      timecode: '0:45s',
-      label: 'Viral Clip Candidate #1',
-      retention: 'High',
-      text: "[0:45] Ever wonder why the best console failed? Sega made one fatal error. They created the perfect machine for the future, but forgot they had to sell it in the present. They built the bridge to online gaming, but PlayStation 2 promised to play DVDs. And in 2000? A DVD player was worth its weight in gold. The Dreamcast didn't die because it was bad; it died because it brought a modem to a movie fight.",
-    },
-    {
-      id: 'b5',
-      type: 'paragraph',
-      text: "Let's back up to the Japanese launch. The initial stock shortages weren't a marketing ploy; they were a catastrophic manufacturing bottleneck with the PowerVR2 chip.",
-    },
-    {
-      id: 'b6',
-      type: 'clip',
-      timecode: '0:38s',
-      label: 'Viral Clip Candidate #2',
-      retention: 'Med',
-      text: '[2:15] The date every gamer remembers: September 9, 1999. 9-9-99. The American launch was a masterclass in hype. They sold over 225,000 units in 24 hours, making $98 million. It was the biggest 24 hours in entertainment retail history at the time. Bigger than Star Wars. But the hype couldn\'t save them from the structural rot that was already setting in from Tokyo.',
-    },
-    {
-      id: 'b7',
-      type: 'paragraph',
-      text: "Shenmue, arguably the crown jewel of the system, cost a staggering $47 million to produce. Yu Suzuki's masterpiece was pushing boundaries that wouldn't become standard for another decade. But when your install base is struggling, a $47 million budget isn't an investment; it's an anchor.",
-    },
-  ]);
+  const [blocks, setBlocks] = useState<ScriptBlock[]>([]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setBlocks([
+        {
+          id: 'b1',
+          type: 'paragraph',
+          text: '[0:00] INT. NEON-LIT STUDIO - NIGHT\n\nThe year is 1999. The internet is screaming through 56k modems, CD players are skipping in your pocket, and Sega is about to make the biggest gamble in gaming history.',
+        },
+        {
+          id: 'b2',
+          type: 'paragraph',
+          text: 'They called it the Dreamcast. It was beautiful. It was ahead of its time. It had an actual modem built into it before most homes even understood what broadband was.',
+        },
+        {
+          id: 'b3',
+          type: 'paragraph',
+          text: 'But the dream was fragile. And a storm named PlayStation 2 was already brewing on the horizon.',
+        },
+        {
+          id: 'b4',
+          type: 'clip',
+          timecode: '0:45s',
+          label: 'Viral Clip Candidate #1',
+          retention: 'High',
+          text: "[0:45] Ever wonder why the best console failed? Sega made one fatal error. They created the perfect machine for the future, but forgot they had to sell it in the present. They built the bridge to online gaming, but PlayStation 2 promised to play DVDs. And in 2000? A DVD player was worth its weight in gold. The Dreamcast didn't die because it was bad; it died because it brought a modem to a movie fight.",
+        },
+        {
+          id: 'b5',
+          type: 'paragraph',
+          text: "Let's back up to the Japanese launch. The initial stock shortages weren't a marketing ploy; they were a catastrophic manufacturing bottleneck with the PowerVR2 chip.",
+        },
+        {
+          id: 'b6',
+          type: 'clip',
+          timecode: '0:38s',
+          label: 'Viral Clip Candidate #2',
+          retention: 'Med',
+          text: '[2:15] The date every gamer remembers: September 9, 1999. 9-9-99. The American launch was a masterclass in hype. They sold over 225,000 units in 24 hours, making $98 million. It was the biggest 24 hours in entertainment retail history at the time. Bigger than Star Wars. But the hype couldn\'t save them from the structural rot that was already setting in from Tokyo.',
+        },
+        {
+          id: 'b7',
+          type: 'paragraph',
+          text: "Shenmue, arguably the crown jewel of the system, cost a staggering $47 million to produce. Yu Suzuki's masterpiece was pushing boundaries that wouldn't become standard for another decade. But when your install base is struggling, a $47 million budget isn't an investment; it's an anchor.",
+        },
+      ]);
+      setScriptTitle('The Rise and Fall of Dreamcast.md');
+    } else {
+      setBlocks([]);
+      setScriptTitle('Untitled Script.md');
+    }
+  }, [isAuthenticated]);
 
   // Statistics calculation
   const [wordCount, setWordCount] = useState(1842);
@@ -263,48 +273,58 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
             </div>
 
             {/* Editor Text Blocks */}
-            <div className="flex-1 font-body-lg text-body-lg text-on-surface leading-[1.8] flex flex-col gap-6 pb-32">
-              {blocks.map((block) => {
-                if (block.type === 'clip') {
-                  return (
-                    <div 
-                      key={block.id} 
-                      className="relative p-4 -ml-4 -mr-4 bg-[#6366f1]/5 border border-dashed border-[#6366f1]/30 rounded group block-hover mt-4"
-                    >
-                      <div className="absolute -top-3 right-4 bg-[#1e1b4b] text-[#818cf8] font-label-sm text-label-sm px-2 py-0.5 rounded border border-[#6366f1]/40 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
-                        {block.label}
+            <div className="flex-grow font-body-lg text-body-lg text-on-surface leading-[1.8] flex flex-col gap-6 pb-32">
+              {blocks.length > 0 ? (
+                blocks.map((block) => {
+                  if (block.type === 'clip') {
+                    return (
+                      <div 
+                        key={block.id} 
+                        className="relative p-4 -ml-4 -mr-4 bg-[#6366f1]/5 border border-dashed border-[#6366f1]/30 rounded group block-hover mt-4"
+                      >
+                        <div className="absolute -top-3 right-4 bg-[#1e1b4b] text-[#818cf8] font-label-sm text-label-sm px-2 py-0.5 rounded border border-[#6366f1]/40 flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
+                          {block.label}
+                        </div>
+                        <div className="absolute -left-12 top-4 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-2 items-start block-actions">
+                          <span className="material-symbols-outlined text-outline-variant cursor-grab text-[18px]">drag_indicator</span>
+                          <button className="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center hover:text-primary transition-colors border border-outline-variant">
+                            <span className="material-symbols-outlined text-[14px]">magic_button</span>
+                          </button>
+                        </div>
+                        <textarea
+                          className="w-full bg-transparent border-none text-on-surface resize-none focus:ring-0 p-0 font-body-lg leading-[1.8] outline-none"
+                          value={block.text}
+                          rows={Math.ceil(block.text.length / 75)}
+                          onChange={(e) => handleBlockChange(block.id, e.target.value)}
+                        />
                       </div>
-                      <div className="absolute -left-12 top-4 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col gap-2 items-start block-actions">
-                        <span className="material-symbols-outlined text-outline-variant cursor-grab text-[18px]">drag_indicator</span>
-                        <button className="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center hover:text-primary transition-colors border border-outline-variant">
-                          <span className="material-symbols-outlined text-[14px]">magic_button</span>
-                        </button>
+                    );
+                  } else {
+                    return (
+                      <div key={block.id} className="block-hover relative group flex items-start">
+                        <div className="absolute -left-12 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 items-start block-actions">
+                          <span className="material-symbols-outlined text-outline-variant cursor-grab text-[18px]">drag_indicator</span>
+                        </div>
+                        <textarea
+                          className="w-full bg-transparent border-none text-on-surface resize-none focus:ring-0 p-0 font-body-lg leading-[1.8] outline-none"
+                          value={block.text}
+                          rows={Math.ceil(block.text.length / 75)}
+                          onChange={(e) => handleBlockChange(block.id, e.target.value)}
+                        />
                       </div>
-                      <textarea
-                        className="w-full bg-transparent border-none text-on-surface resize-none focus:ring-0 p-0 font-body-lg leading-[1.8] outline-none"
-                        value={block.text}
-                        rows={Math.ceil(block.text.length / 75)}
-                        onChange={(e) => handleBlockChange(block.id, e.target.value)}
-                      />
-                    </div>
-                  );
-                } else {
-                  return (
-                    <div key={block.id} className="block-hover relative group flex items-start">
-                      <div className="absolute -left-12 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2 items-start block-actions">
-                        <span className="material-symbols-outlined text-outline-variant cursor-grab text-[18px]">drag_indicator</span>
-                      </div>
-                      <textarea
-                        className="w-full bg-transparent border-none text-on-surface resize-none focus:ring-0 p-0 font-body-lg leading-[1.8] outline-none"
-                        value={block.text}
-                        rows={Math.ceil(block.text.length / 75)}
-                        onChange={(e) => handleBlockChange(block.id, e.target.value)}
-                      />
-                    </div>
-                  );
-                }
-              })}
+                    );
+                  }
+                })
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 px-8 border-2 border-dashed border-[#262626] rounded-xl bg-[#171717]/20 text-center max-w-lg mx-auto mt-10">
+                  <span className="material-symbols-outlined text-5xl text-indigo-accent mb-4">edit_note</span>
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-2">Write a prompt to generate your first script...</h3>
+                  <p className="text-body-md text-xs text-on-surface-variant max-w-sm">
+                    Our AI Writer will incorporate your unique linguistic DNA, pacing, and vocabulary signatures, then auto-segment high-retention viral clips.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
