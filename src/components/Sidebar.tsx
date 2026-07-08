@@ -1,4 +1,5 @@
 import React from 'react';
+import { useAppContext } from '../context/AppContext';
 
 interface SidebarProps {
   activeView: string;
@@ -24,11 +25,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onLogout,
   onNewScript,
 }) => {
+  const { theme, toggleTheme, language, toggleLanguage, t } = useAppContext();
+
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
-    { id: 'my-scripts', label: 'My Scripts', icon: 'description' },
-    { id: 'style-ai-training', label: 'Style AI Training', icon: 'model_training' },
-    { id: 'settings', label: 'Settings', icon: 'settings' },
+    { id: 'dashboard', label: t('nav.dashboard'), icon: 'dashboard' },
+    { id: 'my-scripts', label: t('nav.myScripts'), icon: 'description' },
+    { id: 'style-ai-training', label: t('nav.styleTraining'), icon: 'model_training' },
+    { id: 'settings', label: t('nav.settings'), icon: 'settings' },
   ];
 
   return (
@@ -43,13 +46,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="flex flex-col">
           <span className="font-headline-sm text-headline-sm font-bold text-primary">ScriptFlow AI</span>
           <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">
-            {auth.user ? auth.user.tier : 'GUEST SESSION'}
+            {auth.user ? auth.user.tier : t('nav.guestSession')}
           </span>
         </div>
       </div>
 
       {/* CTA: New Script */}
-      <button 
+      <button
         onClick={() => {
           if (!auth.user) {
             onOpenAuthModal();
@@ -60,7 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         className="w-full bg-primary text-on-primary font-label-md text-label-md py-2.5 rounded flex items-center justify-center gap-2 hover:bg-primary-fixed transition-colors mt-2 btn-interact cursor-pointer"
       >
         <span className="material-symbols-outlined text-[18px]">{auth.user ? 'add' : 'lock'}</span>
-        New Script
+        {t('nav.newScript')}
       </button>
 
       {/* Main Nav */}
@@ -81,20 +84,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               className={`w-full flex items-center gap-3 px-3 py-2 transition-all rounded-lg group cursor-pointer ${
                 isActive
                   ? 'text-primary bg-secondary-container font-semibold'
-                  : 'text-on-surface-variant hover:bg-surface-container-high hover:text-white'
+                  : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
               }`}
             >
-              <span 
-                className={`material-symbols-outlined group-hover:text-primary transition-colors ${
-                  isActive ? 'text-primary' : ''
-                }`}
+              <span
+                className={`material-symbols-outlined group-hover:text-primary transition-colors ${isActive ? 'text-primary' : ''}`}
                 style={{ fontVariationSettings: isActive ? "'FILL' 1" : undefined }}
               >
                 {item.icon}
               </span>
               <span className="font-body-md text-body-md">{item.label}</span>
               {isRestricted && (
-                <span className="material-symbols-outlined text-[16px] ml-auto text-outline-variant group-hover:text-white transition-colors">lock</span>
+                <span className="material-symbols-outlined text-[16px] ml-auto text-outline-variant group-hover:text-on-surface transition-colors">lock</span>
               )}
             </button>
           );
@@ -105,30 +106,55 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="mt-auto space-y-1 pt-4 border-t border-outline-variant">
         <a className="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high transition-colors rounded-lg group" href="#retention">
           <span className="material-symbols-outlined group-hover:text-primary transition-colors">analytics</span>
-          <span className="font-body-md text-body-md">Retention Rules</span>
+          <span className="font-body-md text-body-md">{t('nav.retentionRules')}</span>
         </a>
         <a className="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high transition-colors rounded-lg group" href="#help">
           <span className="material-symbols-outlined group-hover:text-primary transition-colors">help</span>
-          <span className="font-body-md text-body-md">Help</span>
+          <span className="font-body-md text-body-md">{t('nav.help')}</span>
         </a>
+
+        {/* Theme & Language Toggles */}
+        <div className="flex items-center gap-2 px-3 py-2">
+          {/* Theme toggle */}
+          <button
+            onClick={toggleTheme}
+            title={theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode')}
+            className="flex items-center gap-1.5 flex-1 text-on-surface-variant hover:text-primary transition-colors text-xs font-mono rounded-md py-1.5 px-2 hover:bg-surface-container-high"
+          >
+            <span className="material-symbols-outlined text-[16px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+              {theme === 'dark' ? 'light_mode' : 'dark_mode'}
+            </span>
+            <span>{theme === 'dark' ? t('settings.lightMode') : t('settings.darkMode')}</span>
+          </button>
+
+          {/* Language toggle */}
+          <button
+            onClick={toggleLanguage}
+            title={language === 'en' ? 'Cambiar a Español' : 'Switch to English'}
+            className="flex items-center justify-center gap-1 text-on-surface-variant hover:text-primary transition-colors text-[10px] font-mono font-bold rounded-md py-1.5 px-2.5 hover:bg-surface-container-high border border-outline-variant"
+          >
+            <span className="material-symbols-outlined text-[14px]">translate</span>
+            {language === 'en' ? 'ES' : 'EN'}
+          </button>
+        </div>
 
         {/* User Session Footer */}
         {auth.user ? (
           <div className="pt-4 mt-4 flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
-              <img 
-                className="w-8 h-8 rounded-full border border-outline object-cover" 
-                src={auth.user.avatarUrl} 
-                alt={auth.user.name} 
+              <img
+                className="w-8 h-8 rounded-full border border-outline object-cover"
+                src={auth.user.avatarUrl}
+                alt={auth.user.name}
               />
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-white">{auth.user.name}</span>
+                <span className="text-xs font-semibold text-on-surface">{auth.user.name}</span>
                 <span className="text-[9px] text-on-surface-variant uppercase tracking-widest">{auth.user.tier}</span>
               </div>
             </div>
-            <button 
+            <button
               onClick={onLogout}
-              className="text-[10px] text-zinc-500 hover:text-red-400 font-mono transition-colors"
+              className="text-[10px] text-on-surface-variant hover:text-red-400 font-mono transition-colors"
               title="Log Out"
             >
               <span className="material-symbols-outlined text-[16px]">logout</span>
@@ -136,19 +162,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ) : (
           <div className="p-3 bg-surface-container rounded-xl flex flex-col gap-2 mt-4">
-            <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">Guest Session</span>
+            <span className="text-[10px] font-mono text-on-surface-variant uppercase tracking-widest">{t('nav.guestSession')}</span>
             <div className="flex gap-2">
-              <button 
+              <button
                 onClick={onOpenAuthModal}
                 className="flex-1 text-xs bg-primary-container text-on-primary-container py-1 rounded text-center font-bold hover:opacity-90 transition-opacity"
               >
-                Log In
+                {t('nav.login')}
               </button>
-              <button 
+              <button
                 onClick={onOpenAuthModal}
-                className="flex-1 text-xs border border-outline-variant py-1 rounded text-center hover:bg-white/5 transition-all text-on-surface-variant"
+                className="flex-1 text-xs border border-outline-variant py-1 rounded text-center hover:bg-surface-container-high transition-all text-on-surface-variant"
               >
-                Register
+                {t('nav.register')}
               </button>
             </div>
           </div>

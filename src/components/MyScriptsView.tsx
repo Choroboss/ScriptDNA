@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { generateScript, saveScript, fetchSavedScripts, refineScript } from '../services/api';
+import { useAppContext } from '../context/AppContext';
 import type { SavedScript } from '../services/api';
 
 interface ScriptBlock {
@@ -58,6 +59,8 @@ function apiBlocksToScriptBlocks(raw: any[]): ScriptBlock[] {
 }
 
 export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAuthenticated, onOpenAuthModal }) => {
+  const { t } = useAppContext();
+
   // Config state
   const [suspenseFreq, setSuspenseFreq] = useState(3);
   const [hookReminder, setHookReminder] = useState(true);
@@ -275,12 +278,6 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
     saving: 'text-amber-400 animate-pulse',
     unsaved: 'text-amber-400',
   };
-  const saveIndicatorLabels: Record<typeof saveStatus, string> = {
-    idle: '',
-    saved: '✓ Saved',
-    saving: 'Saving...',
-    unsaved: '● Unsaved',
-  };
 
   return (
     <main className="ml-[260px] flex-1 flex h-screen">
@@ -335,9 +332,9 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
               </div>
             )}
             <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold tracking-tight">{scriptTitle}</h2>
-            <span className="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">Draft</span>
+            <span className="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">{t('scripts.draft')}</span>
             {isAuthenticated && saveStatus !== 'idle' && (
-              <span className={`text-xs font-mono ${saveIndicatorColors[saveStatus]}`}>{saveIndicatorLabels[saveStatus]}</span>
+              <span className={`text-xs font-mono ${saveIndicatorColors[saveStatus]}`}>{t(`scripts.${saveStatus}`)}</span>
             )}
           </div>
           <div className="flex gap-6 items-center text-on-surface-variant font-label-md text-label-md">
@@ -355,7 +352,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 className={`ml-2 px-3 py-1.5 border rounded text-label-sm transition-all flex items-center gap-2 btn-interact ${refineMode ? 'border-[#6366f1] text-[#818cf8] bg-[#1e1b4b]/40' : 'border-[#3f3f46] text-on-surface hover:border-[#fafafa]'}`}
               >
                 <span className="material-symbols-outlined text-[16px]">auto_fix_high</span>
-                Refine with AI
+                {t('scripts.refineAi')}
               </button>
             )}
           </div>
@@ -367,7 +364,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
             {refining ? (
               <div className="flex-1 flex items-center gap-3 text-[#818cf8]">
                 <span className="material-symbols-outlined text-[20px] animate-spin">sync</span>
-                <span className="text-sm font-medium italic animate-pulse">AI is polishing your draft...</span>
+                <span className="text-sm font-medium italic animate-pulse">{t('scripts.refining')}</span>
               </div>
             ) : (
               <form onSubmit={handleRefine} className="flex flex-1 gap-3 items-center">
@@ -375,7 +372,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 <input
                   type="text"
                   className="flex-1 bg-transparent border-none text-sm text-on-surface placeholder-[#6366f1]/60 outline-none focus:ring-0"
-                  placeholder='Tell the AI how to improve the script (e.g. "Make the hook punchier", "Rewrite block 3 in a more aggressive tone")'
+                  placeholder={t('scripts.refinePlaceholder')}
                   value={refinePrompt}
                   onChange={(e) => setRefinePrompt(e.target.value)}
                 />
@@ -384,7 +381,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                   disabled={!refinePrompt.trim() || blocks.length === 0}
                   className="bg-[#6366f1] text-white text-xs px-4 py-1.5 rounded font-bold hover:bg-[#4f52d1] disabled:opacity-40 transition-colors whitespace-nowrap"
                 >
-                  Apply Refinement
+                  {t('scripts.refineApply')}
                 </button>
                 <button type="button" onClick={() => setRefineMode(false)} className="text-outline-variant hover:text-on-surface transition-colors">
                   <span className="material-symbols-outlined text-[18px]">close</span>
@@ -426,18 +423,18 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer whitespace-nowrap"
               >
                 <span className="material-symbols-outlined text-[18px]">magic_button</span>
-                {generating ? 'AI Generating...' : 'Write Script'}
+                {generating ? t('scripts.generating') : t('scripts.generate')}
               </button>
             </form>
           ) : (
             <div className="flex flex-1 justify-between items-center bg-surface-container-highest/20 p-2.5 rounded border border-dashed border-outline-variant/60">
-              <span className="text-body-md text-on-surface-variant italic">Viewing pre-loaded sample script ('The Rise and Fall of Dreamcast.md')</span>
+              <span className="text-body-md text-on-surface-variant italic">{t('scripts.previewLabel')}</span>
               <button
                 onClick={onOpenAuthModal}
                 className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer text-xs"
               >
                 <span className="material-symbols-outlined text-[16px]">lock</span>
-                Register to Generate Your Own Scripts
+                {t('scripts.registerCTA')}
               </button>
             </div>
           )}
@@ -502,10 +499,8 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
               ) : (
                 <div className="flex flex-col items-center justify-center py-20 px-8 border-2 border-dashed border-[#262626] rounded-xl bg-[#171717]/20 text-center max-w-lg mx-auto mt-10">
                   <span className="material-symbols-outlined text-5xl text-indigo-accent mb-4">edit_note</span>
-                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-2">Write a prompt to generate your first script...</h3>
-                  <p className="text-body-md text-xs text-on-surface-variant max-w-sm">
-                    Our AI Writer will incorporate your unique linguistic DNA, pacing, and vocabulary signatures, then auto-segment high-retention viral clips.
-                  </p>
+                  <h3 className="font-headline-sm text-headline-sm text-on-surface font-semibold mb-2">{t('scripts.emptyTitle')}</h3>
+                  <p className="text-body-md text-xs text-on-surface-variant max-w-sm">{t('scripts.emptyBody')}</p>
                 </div>
               )}
             </div>
@@ -519,7 +514,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
         <header className="h-16 border-b tech-border flex items-center justify-between px-4">
           <div className="flex items-center gap-2 text-primary">
             <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>movie_filter</span>
-            <h3 className="font-headline-sm text-headline-sm font-semibold">AI Clip Extractor</h3>
+            <h3 className="font-headline-sm text-headline-sm font-semibold">{t('clips.title')}</h3>
           </div>
           <button className="text-outline-variant hover:text-on-surface transition-colors">
             <span className="material-symbols-outlined text-[20px]">filter_list</span>
@@ -537,7 +532,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                   <span className="font-label-sm text-label-sm text-primary bg-[#1e1b4b] px-1.5 py-0.5 rounded absolute top-4 right-4">{clip.timecode || '0:00s'}</span>
                 </div>
                 <div className="mb-4">
-                  <span className="font-label-sm text-label-sm text-outline-variant uppercase tracking-wider block mb-1">Hook Analysis</span>
+                  <span className="font-label-sm text-label-sm text-outline-variant uppercase tracking-wider block mb-1">{t('clips.hookAnalysis')}</span>
                   <p className="font-body-md text-[13px] text-[#818cf8] line-clamp-3 italic border-l-2 border-[#6366f1] pl-2">
                     "{clip.clip_metadata?.suggested_hook || clip.text.substring(0, 100)}..."
                   </p>
@@ -545,13 +540,13 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 <div className="flex items-center justify-between mt-auto pt-3 border-t border-[#262626]">
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${clip.retention === 'High' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-                    <span className="font-label-sm text-label-sm text-outline-variant">{clip.retention} Retention</span>
+                    <span className="font-label-sm text-label-sm text-outline-variant">{clip.retention === 'High' ? t('clips.high') : clip.retention === 'Med' ? t('clips.med') : t('clips.low')} {t('clips.retention')}</span>
                   </div>
                   <button
                     onClick={() => handleExportClip(clip)}
                     className="text-primary font-label-md text-label-md hover:text-primary-fixed transition-colors flex items-center gap-1"
                   >
-                    Export Script <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                    {t('clips.export')} <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
                   </button>
                 </div>
               </div>
@@ -567,8 +562,8 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
               <span className="material-symbols-outlined">{scanning ? 'sync' : 'auto_awesome'}</span>
             </div>
             <div>
-              <span className="font-label-md text-label-md text-on-surface block mb-1">{scanning ? 'Scanning Script...' : 'Scan for more clips'}</span>
-              <span className="font-body-md text-[12px] text-on-surface-variant">{scanning ? 'Analyzing hook structure...' : 'AI will analyze the rest of the draft'}</span>
+              <span className="font-label-md text-label-md text-on-surface block mb-1">{scanning ? t('clips.scanning') : t('clips.scan')}</span>
+              <span className="font-body-md text-[12px] text-on-surface-variant">{scanning ? t('clips.scanningBody') : t('clips.scanBody')}</span>
             </div>
           </button>
         </div>
@@ -578,19 +573,19 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
           <div className="flex items-center justify-between w-full mb-3 text-on-surface-variant">
             <div className="flex items-center gap-3">
               <span className="material-symbols-outlined">analytics</span>
-              <span className="font-label-md text-label-md uppercase tracking-wider">Retention Settings</span>
+              <span className="font-label-md text-label-md uppercase tracking-wider">{t('clips.retentionSettings')}</span>
             </div>
           </div>
           <div className="flex flex-col gap-4" onClickCapture={handleRetentionClick}>
             <div>
-              <label className="font-label-sm text-label-sm text-on-surface-variant flex justify-between mb-2">
-                <span>Suspense Frequency</span>
-                <span className="text-primary">{suspenseFreq === 3 ? 'High' : suspenseFreq === 2 ? 'Med' : 'Low'}</span>
-              </label>
+                <label className="font-label-sm text-label-sm text-on-surface-variant flex justify-between mb-2">
+                  <span>{t('clips.suspenseFreq')}</span>
+                  <span className="text-primary">{suspenseFreq === 3 ? t('clips.high') : suspenseFreq === 2 ? t('clips.med') : t('clips.low')}</span>
+                </label>
               <input className="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary" max="3" min="1" type="range" value={suspenseFreq} onChange={(e) => setSuspenseFreq(Number(e.target.value))} />
             </div>
             <div className="flex items-center justify-between">
-              <span className="font-label-sm text-label-sm text-on-surface-variant">Hook Reminder (2m)</span>
+              <span className="font-label-sm text-label-sm text-on-surface-variant">{t('clips.hookReminder')}</span>
               <button onClick={() => setHookReminder(!hookReminder)} className={`w-8 h-4 rounded-full relative transition-colors flex items-center p-0.5 ${hookReminder ? 'bg-primary' : 'bg-outline-variant'}`}>
                 <div className={`w-3 h-3 rounded-full absolute transition-transform bg-on-primary ${hookReminder ? 'right-0.5' : 'left-0.5'}`}></div>
               </button>

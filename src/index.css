@@ -67,21 +67,101 @@
   --font-family-body-lg: Inter;
 }
 
+/* ── Smooth color transition on theme switch ────────────────────────── */
+*, *::before, *::after {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.1s ease;
+}
+
 body {
   background-color: #0a0a0a;
   color: #e5e2e1;
   -webkit-font-smoothing: antialiased;
 }
 
+/* ── Light Mode Overrides ───────────────────────────────────────────── */
+:root.light body {
+  background-color: #f5f5f7;
+  color: #1a1a2e;
+}
+
+:root.light {
+  /* Surface layers */
+  --color-background: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-surface-dim: #e8e8ec;
+  --color-surface-bright: #ffffff;
+  --color-surface-container-lowest: #fafafa;
+  --color-surface-container-low: #f2f2f5;
+  --color-surface-container: #ebebef;
+  --color-surface-container-high: #e2e2e8;
+  --color-surface-container-highest: #d8d8e0;
+  --color-surface-variant: #e4e0f3;
+
+  /* Text */
+  --color-on-surface: #1a1a2e;
+  --color-on-surface-variant: #49454f;
+  --color-on-background: #1a1a2e;
+
+  /* Primary accent (indigo stays, just lighter bg) */
+  --color-primary: #4f51d8;
+  --color-primary-container: #e8e8ff;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #0d0096;
+  --color-indigo-accent: #4f51d8;
+
+  /* Secondary */
+  --color-secondary: #5a5b5e;
+  --color-secondary-container: #dfe0e4;
+  --color-on-secondary: #ffffff;
+
+  /* Outline */
+  --color-outline: #b0aec0;
+  --color-outline-variant: #dde0e6;
+
+  /* Error */
+  --color-error: #b3261e;
+  --color-on-error: #ffffff;
+}
+
+/* Light mode specific surface fixes for hardcoded hex values */
+:root.light .bg-\[\#0a0a0a\] { background-color: #f5f5f7 !important; }
+:root.light .bg-\[\#121212\] { background-color: #ffffff !important; }
+:root.light .bg-\[\#171717\] { background-color: #f8f8fc !important; }
+:root.light .bg-\[\#1a1a1a\] { background-color: #f2f2f7 !important; }
+:root.light .bg-\[\#1e1b4b\] { background-color: #eeeeff !important; }
+:root.light .bg-\[\#1a1524\] { background-color: #f4f0ff !important; }
+:root.light .border-\[\#262626\] { border-color: #dde0e6 !important; }
+:root.light .border-\[\#3f3f46\] { border-color: #c8c8d0 !important; }
+:root.light .text-white { color: #1a1a2e !important; }
+:root.light .text-\[\#818cf8\] { color: #4f51d8 !important; }
+:root.light .text-\[\#e5e2e1\] { color: #1a1a2e !important; }
+:root.light .text-zinc-500 { color: #6b7280 !important; }
+
+/* Sidebar light mode */
+:root.light aside.bg-background {
+  background-color: #ffffff;
+  border-right-color: #dde0e6;
+}
+
+/* Editor textarea in light mode */
+:root.light textarea { color: #1a1a2e !important; }
+
+/* Ambient glow in light mode */
+:root.light .bg-primary\/5 { background-color: rgba(79, 81, 216, 0.04) !important; }
+
+/* ── Scrollbar ──────────────────────────────────────────────────────── */
 .material-symbols-outlined {
   font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
   vertical-align: middle;
 }
 
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-.custom-scrollbar::-webkit-scrollbar-track { background: #0a0a0a; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
 .custom-scrollbar::-webkit-scrollbar-thumb { background: #262626; border-radius: 2px; }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
+
+:root.light .custom-scrollbar::-webkit-scrollbar-thumb { background: #c8c8d0; }
+:root.light .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #b0aec0; }
 
 .editor-focus-border:focus-within { border-color: #6366f1; }
 
@@ -94,6 +174,7 @@ body {
 }
 .animate-pulse-indigo { animation: pulse-indigo 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 .glass-panel { background: rgba(32, 31, 31, 0.4); backdrop-filter: blur(8px); }
+:root.light .glass-panel { background: rgba(255, 255, 255, 0.7); }
 .sidebar-border { border-right: 1px solid #262626; }
 .bottom-border { border-bottom: 1px solid #262626; }
 .card-border { border: 1px solid #262626; }
@@ -104,11 +185,16 @@ body {
   backdrop-filter: blur(20px);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
+:root.light .glass-modal {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
 
 .tech-border {
   border-width: 1px;
   border-color: #262626;
 }
+:root.light .tech-border { border-color: #dde0e6; }
 
 .block-hover:hover .block-actions {
   opacity: 1;
