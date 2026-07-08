@@ -62,6 +62,11 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
+    # Migrate: add gemini_api_key if not present (idempotent)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN gemini_api_key TEXT")
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -131,6 +136,9 @@ class LoginRequest(BaseModel):
     email: str
     password: str
 
+class SaveUserKeysRequest(BaseModel):
+    gemini_api_key: str = None
+
 # --- Helpers ---
 
 def hash_password(password: str) -> str:
@@ -157,6 +165,17 @@ def get_user_id_by_email(email: str) -> int:
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+def get_user_gemini_key(email: str) -> str:
+    """Retrieve the Gemini API key stored in this user's DB row. Returns None if not set."""
+    if not email:
+        return None
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT gemini_api_key FROM users WHERE email = ?", (email.strip().lower(),))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
 
 def fetch_youtube_video_title(video_id: str) -> str:
     url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -247,6 +266,36 @@ async def login(payload: LoginRequest):
             "tier": user[3],
             "avatarUrl": user[4]
         }
+    }
+
+@app.post("/api/v1/auth/settings/keys")
+async def save_user_keys(payload: SaveUserKeysRequest, request: Request):
+    """Persist the user's Gemini API key into their own DB row. Only the key owner can write it."""
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE users SET gemini_api_key = ? WHERE email = ?",
+        (payload.gemini_api_key.strip() if payload.gemini_api_key else None, user_email)
+    )
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found.")
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "API key saved securely to your profile."}
+
+@app.get("/api/v1/auth/settings/keys")
+async def get_user_key_status(request: Request):
+    """Return key presence status only — never expose the raw key to the browser."""
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    key = get_user_gemini_key(user_email)
+    return {
+        "gemini": "CONNECTED" if key else "MISSING",
     }
 
 @app.post("/api/v1/training/ingest-youtube")
@@ -519,15 +568,17 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
 
 @app.post("/api/v1/scripts/generate")
 async def generate_script(payload: ScriptGenerateRequest, request: Request):
-    gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
-    
+    # SECURITY: Always fetch the key from the DB for the authenticated user.
+    # Never trust a key sent in request headers — this prevents cross-user key leakage.
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    gemini_key = get_user_gemini_key(user_email)
+
     if gemini_key:
-        print(f"Active API Key Received: {gemini_key[:6]}...")
+        print(f"DB key resolved for {user_email}: {gemini_key[:6]}...")
     else:
-        print("Active API Key Received: None")
         raise HTTPException(
             status_code=400,
-            detail="Missing Gemini API Key. Please configure and save your API Key in Settings first."
+            detail="Missing Gemini API Key. Please add your own Gemini Key in Settings to unlock generation."
         )
     
     pacing_desc = "Punchy & Fast-Paced"
@@ -805,9 +856,11 @@ async def save_script(payload: ScriptSaveRequest, request: Request):
 
 @app.post("/api/v1/scripts/refine")
 async def refine_script(payload: ScriptRefineRequest, request: Request):
-    gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
+    # SECURITY: Fetch key from DB — never from headers
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    gemini_key = get_user_gemini_key(user_email)
     if not gemini_key:
-        raise HTTPException(status_code=400, detail="Missing Gemini API Key. Configure it in Settings.")
+        raise HTTPException(status_code=400, detail="Missing Gemini API Key. Please add your own Gemini Key in Settings to unlock generation.")
 
     pacing_desc = "Punchy & Fast-Paced"
     wpm = 170

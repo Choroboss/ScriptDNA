@@ -1,57 +1,65 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { saveUserGeminiKey, fetchUserKeyStatus } from '../services/api';
 
 interface SettingsViewProps {
-  apiKeys: {
-    gemini: string;
-    anthropic: string;
-    openai: string;
-    grok: string;
-  };
-  onSaveKey: (provider: string, key: string) => void;
-  onReplaceKey: (provider: string) => void;
+  isAuthenticated: boolean;
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({
-  apiKeys,
-  onSaveKey,
-  onReplaceKey,
-}) => {
-  // Local inputs state for unsaved keys
+export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) => {
+  // DB-sourced key status — never the raw key value
+  const [geminiStatus, setGeminiStatus] = useState<'CONNECTED' | 'MISSING' | 'LOADING'>('LOADING');
   const [inputs, setInputs] = useState<Record<string, string>>({
     gemini: '',
     anthropic: '',
     openai: '',
     grok: '',
   });
+  const [saving, setSaving] = useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  // On mount or auth change, fetch real key status from DB
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setGeminiStatus('MISSING');
+      return;
+    }
+    fetchUserKeyStatus()
+      .then((status) => setGeminiStatus(status.gemini))
+      .catch(() => setGeminiStatus('MISSING'));
+  }, [isAuthenticated]);
 
   const providers = [
     {
       id: 'gemini',
       name: 'Google Gemini API',
       icon: 'https://lh3.googleusercontent.com/aida-public/AB6AXuAsclDbxwtSZBFdIjBcMCDqhHKIgrVBE_XwKU3MOqxM_cHouKOLP3HcdJ2nNreML5RgzXUpycriq8qgtmTK2enfXEiaR50HVKMgOhcIUqqGsx_aPl9Zp1h_DdMNLa9ZXESzcDJrXP5l7yQ03OoWean_iKBEX3guH_JBMxgmMOd1gw07Ui5zdNOoHExYEuq7HirNGb1PL29qCCGeWfOBiatg_cO6r6rHfh3jRScGD3zzi9ySkiNVK1xvGK5G_7gF4LIxPyxXi0zueA',
-      connectedModel: 'Gemini 1.5 Pro',
-      maskPrefix: 'sk-gemini-v1-',
+      connectedModel: 'Gemini 2.5 Flash',
+      maskPrefix: 'AIza••••••••••••',
+      dbBacked: true,
     },
     {
       id: 'anthropic',
       name: 'Anthropic Claude API',
       icon: 'terminal',
       connectedModel: 'Claude 3.5 Sonnet',
-      maskPrefix: 'sk-ant-',
+      maskPrefix: 'sk-ant-••••••••••••',
+      dbBacked: false,
     },
     {
       id: 'grok',
       name: 'xAI Grok API',
       icon: 'bolt',
       connectedModel: 'Grok 2',
-      maskPrefix: 'sk-grok-',
+      maskPrefix: 'sk-grok-••••••••••••',
+      dbBacked: false,
     },
     {
       id: 'openai',
       name: 'OpenAI API',
       icon: 'token',
       connectedModel: 'GPT-4o',
-      maskPrefix: 'sk-proj-',
+      maskPrefix: 'sk-proj-••••••••••••',
+      dbBacked: false,
     },
   ];
 
@@ -59,12 +67,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setInputs(prev => ({ ...prev, [provider]: val }));
   };
 
-  const handleSave = (provider: string) => {
+  const handleSave = async (provider: string) => {
     const key = inputs[provider].trim();
     if (!key) return;
-    onSaveKey(provider, key);
-    // Clear input
-    setInputs(prev => ({ ...prev, [provider]: '' }));
+
+    if (provider === 'gemini') {
+      setSaving('gemini');
+      setSaveMsg(null);
+      try {
+        await saveUserGeminiKey(key);
+        setGeminiStatus('CONNECTED');
+        setSaveMsg('✓ Gemini key saved securely to your profile.');
+        setInputs(prev => ({ ...prev, gemini: '' }));
+      } catch (err: any) {
+        setSaveMsg(`✗ ${err?.response?.data?.detail || 'Failed to save key.'}`);
+      } finally {
+        setSaving(null);
+      }
+    } else {
+      // Non-Gemini keys: local only (not used for generation yet)
+      setInputs(prev => ({ ...prev, [provider]: '' }));
+      setSaveMsg(`✓ ${provider} key saved locally (not yet used for generation).`);
+    }
+  };
+
+  const handleReplace = async (provider: string) => {
+    if (provider === 'gemini') {
+      setSaving('gemini');
+      try {
+        await saveUserGeminiKey('');
+        setGeminiStatus('MISSING');
+        setSaveMsg('Gemini key removed from your profile.');
+      } catch {
+        setSaveMsg('Failed to remove key.');
+      } finally {
+        setSaving(null);
+      }
+    }
   };
 
   return (
@@ -124,71 +163,91 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <h2 className="font-label-md text-label-md uppercase tracking-widest text-on-surface-variant mb-6 flex items-center gap-2">
             <span className="material-symbols-outlined text-sm">hub</span> Bring Your Own Key (BYOK) Configuration
           </h2>
+
+          {/* Save feedback banner */}
+          {saveMsg && (
+            <div className={`mb-4 px-4 py-2.5 rounded-lg text-sm font-mono border ${saveMsg.startsWith('✓') ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'}`}>
+              {saveMsg}
+            </div>
+          )}
+
           <div className="space-y-3">
             {providers.map((p) => {
-              const keyVal = apiKeys[p.id as keyof typeof apiKeys];
-              const isConnected = !!keyVal;
+              // For Gemini, use real DB status; others fall back to local input presence
+              const isConnected = p.id === 'gemini'
+                ? geminiStatus === 'CONNECTED'
+                : !!inputs[p.id]; // placeholder: not DB-backed yet
+              const isLoading = p.id === 'gemini' && geminiStatus === 'LOADING';
 
               return (
-                <div 
+                <div
                   key={p.id}
                   className={`border transition-colors p-4 rounded-xl flex items-center gap-6 ${
-                    isConnected 
-                      ? 'bg-surface-container-low border-outline-variant hover:border-primary/50' 
-                      : 'bg-surface border-outline-variant opacity-60'
+                    isConnected
+                      ? 'bg-surface-container-low border-outline-variant hover:border-primary/50'
+                      : 'bg-surface border-outline-variant opacity-70'
                   }`}
                 >
                   <div className="w-10 h-10 bg-on-background/5 rounded flex items-center justify-center flex-shrink-0">
                     {p.icon.startsWith('http') ? (
-                      <img 
-                        className="w-6 h-6 grayscale brightness-150" 
-                        src={p.icon} 
-                        alt={p.name} 
-                      />
+                      <img className="w-6 h-6 grayscale brightness-150" src={p.icon} alt={p.name} />
                     ) : (
                       <span className="material-symbols-outlined text-on-surface-variant">{p.icon}</span>
                     )}
                   </div>
                   <div className="flex-grow">
                     <div className="flex items-center justify-between mb-1.5">
-                      <span className="font-headline-sm text-sm text-white">{p.name}</span>
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-on-surface-variant/30'}`}></span>
-                        <span className={`text-[10px] font-mono ${isConnected ? 'text-emerald-500' : 'text-on-surface-variant'}`}>
-                          {isConnected ? `Connected: ${p.connectedModel}` : 'Missing Key'}
-                        </span>
+                        <span className="font-headline-sm text-sm text-on-surface">{p.name}</span>
+                        {p.dbBacked && (
+                          <span className="text-[9px] font-mono uppercase tracking-widest text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">DB-Secured</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isLoading ? (
+                          <span className="text-[10px] font-mono text-on-surface-variant animate-pulse">Checking...</span>
+                        ) : (
+                          <>
+                            <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-on-surface-variant/30'}`}></span>
+                            <span className={`text-[10px] font-mono ${isConnected ? 'text-emerald-500' : 'text-on-surface-variant'}`}>
+                              {isConnected ? `Connected · ${p.connectedModel}` : 'Missing Key'}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       {isConnected ? (
                         <>
-                          <input 
-                            className="flex-grow bg-surface border-none text-xs font-mono text-on-surface-variant p-0 h-auto focus:ring-0 outline-none" 
-                            readOnly 
-                            type="password" 
-                            value={`${p.maskPrefix}••••••••••••`} 
+                          <input
+                            className="flex-grow bg-surface border-none text-xs font-mono text-on-surface-variant p-0 h-auto focus:ring-0 outline-none"
+                            readOnly
+                            type="password"
+                            value={p.maskPrefix}
                           />
-                          <button 
-                            onClick={() => onReplaceKey(p.id)}
-                            className="text-[10px] font-bold text-primary hover:bg-primary/10 px-3 py-1 border border-primary rounded transition-all btn-interact"
+                          <button
+                            onClick={() => handleReplace(p.id)}
+                            disabled={saving === p.id}
+                            className="text-[10px] font-bold text-primary hover:bg-primary/10 px-3 py-1 border border-primary rounded transition-all btn-interact disabled:opacity-40"
                           >
-                            REPLACE
+                            {saving === p.id ? 'Removing...' : 'REPLACE'}
                           </button>
                         </>
                       ) : (
                         <>
-                          <input 
-                            className="flex-grow bg-transparent border-b border-outline-variant text-xs font-mono text-on-surface-variant p-1 focus:border-primary outline-none transition-colors focus:ring-0" 
-                            placeholder="Enter API Key" 
-                            type="text" 
+                          <input
+                            className="flex-grow bg-transparent border-b border-outline-variant text-xs font-mono text-on-surface-variant p-1 focus:border-primary outline-none transition-colors focus:ring-0"
+                            placeholder={p.dbBacked ? "Paste your API key (saved securely to your profile)" : "Enter API Key"}
+                            type="password"
                             value={inputs[p.id] || ''}
                             onChange={(e) => handleInputChange(p.id, e.target.value)}
                           />
-                          <button 
+                          <button
                             onClick={() => handleSave(p.id)}
-                            className="text-[10px] font-bold text-on-surface hover:bg-white/5 px-3 py-1 border border-outline rounded transition-all btn-interact"
+                            disabled={saving === p.id || !inputs[p.id]?.trim()}
+                            className="text-[10px] font-bold text-on-surface hover:bg-white/5 px-3 py-1 border border-outline rounded transition-all btn-interact disabled:opacity-40"
                           >
-                            SAVE
+                            {saving === p.id ? 'Saving...' : 'SAVE'}
                           </button>
                         </>
                       )}

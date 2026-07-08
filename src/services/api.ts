@@ -35,24 +35,9 @@ export const apiClient = axios.create({
   },
 });
 
-// Interceptor to add BYOK keys and active user session if available
+// Interceptor to add the active user session header on every request.
+// SECURITY: API keys are stored in the server DB, NOT sent from the browser.
 apiClient.interceptors.request.use((config) => {
-  const keysJson = localStorage.getItem('scriptdna_api_keys');
-  if (keysJson) {
-    try {
-      const keys = JSON.parse(atob(keysJson));
-      if (keys.gemini) {
-        config.headers['X-Gemini-API-Key'] = keys.gemini;
-        config.headers['X-Gemini-Key'] = keys.gemini;
-      }
-      if (keys.anthropic) config.headers['X-Anthropic-Key'] = keys.anthropic;
-      if (keys.openai) config.headers['X-OpenAI-Key'] = keys.openai;
-      if (keys.grok) config.headers['X-Grok-Key'] = keys.grok;
-    } catch (e) {
-      console.error('Failed to decrypt local API keys', e);
-    }
-  }
-  
   const userJson = localStorage.getItem('scriptdna_user');
   if (userJson) {
     try {
@@ -75,6 +60,25 @@ apiClient.interceptors.request.use((config) => {
  */
 export async function fetchVoiceProfile(): Promise<VoiceDNASignatures> {
   const response = await apiClient.get('/profile/voice-profile');
+  return response.data;
+}
+
+/**
+ * Saves the user's Gemini API key into their own row in the DB.
+ * POST /api/v1/auth/settings/keys
+ * SECURITY: the key travels one-way from browser → DB, never back.
+ */
+export async function saveUserGeminiKey(gemini_api_key: string): Promise<{ success: boolean; message: string }> {
+  const response = await apiClient.post('/auth/settings/keys', { gemini_api_key });
+  return response.data;
+}
+
+/**
+ * Returns only the masked presence status of the user's stored keys ("CONNECTED" | "MISSING").
+ * GET /api/v1/auth/settings/keys
+ */
+export async function fetchUserKeyStatus(): Promise<{ gemini: 'CONNECTED' | 'MISSING' }> {
+  const response = await apiClient.get('/auth/settings/keys');
   return response.data;
 }
 

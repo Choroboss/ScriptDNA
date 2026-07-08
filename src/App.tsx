@@ -8,47 +8,6 @@ import { SettingsView } from './components/SettingsView';
 import { fetchVoiceProfile, fetchTrainingSources } from './services/api';
 import type { TrainingSource } from './services/api';
 
-// --- Local Storage BYOK Encrypted Wrapper ---
-const STORAGE_KEY = 'scriptdna_api_keys';
-
-interface ApiKeys {
-  gemini: string;
-  anthropic: string;
-  openai: string;
-  grok: string;
-}
-
-const getStoredKeys = (): ApiKeys => {
-  const stored = localStorage.getItem(STORAGE_KEY);
-  if (stored) {
-    try {
-      // Decode Base64 representing mock local encryption
-      const decoded = atob(stored);
-      return JSON.parse(decoded);
-    } catch (e) {
-      console.error('Failed to parse stored API keys', e);
-    }
-  }
-  // Default keys matching Stitch mock (Gemini & Anthropic pre-connected)
-  return {
-    gemini: 'sk-gemini-v1-pro-15829472948294',
-    anthropic: 'sk-ant-claude-3-5-sonnet-847293847294',
-    openai: '',
-    grok: '',
-  };
-};
-
-const saveStoredKeys = (keys: ApiKeys) => {
-  try {
-    const stringified = JSON.stringify(keys);
-    // Encode Base64 representing mock local encryption
-    const encoded = btoa(stringified);
-    localStorage.setItem(STORAGE_KEY, encoded);
-  } catch (e) {
-    console.error('Failed to save API keys to storage', e);
-  }
-};
-
 function App() {
   const [activeView, setActiveView] = useState<string>('dashboard');
   
@@ -69,8 +28,7 @@ function App() {
     };
   });
 
-  // API Keys state
-  const [apiKeys, setApiKeys] = useState<ApiKeys>(getStoredKeys());
+  // API Keys state removed — keys now live in the server DB per user account
 
   // Voice Profile state
   const [voiceProfile, setVoiceProfile] = useState({
@@ -144,25 +102,12 @@ function App() {
 
   const handleLogout = () => {
     localStorage.removeItem('scriptdna_user');
+    localStorage.removeItem('scriptdna_api_keys'); // flush any stale key cache
     setAuth({
       user: null,
       modalOpen: false,
     });
-    // Redirect to dashboard if logged out
     setActiveView('dashboard');
-  };
-
-  // BYOK Actions
-  const handleSaveKey = (provider: string, key: string) => {
-    const updated = { ...apiKeys, [provider]: key };
-    setApiKeys(updated);
-    saveStoredKeys(updated);
-  };
-
-  const handleReplaceKey = (provider: string) => {
-    const updated = { ...apiKeys, [provider]: '' };
-    setApiKeys(updated);
-    saveStoredKeys(updated);
   };
 
   // Add source from uploader or fetcher
@@ -200,7 +145,7 @@ function App() {
           <DashboardView
             onSwitchView={handleSetView}
             sources={sources}
-            apiKeys={apiKeys}
+            apiKeys={{ gemini: '', anthropic: '', openai: '', grok: '' }}
           />
         )}
 
@@ -229,9 +174,7 @@ function App() {
 
         {activeView === 'settings' && (
           <SettingsView
-            apiKeys={apiKeys}
-            onSaveKey={handleSaveKey}
-            onReplaceKey={handleReplaceKey}
+            isAuthenticated={!!auth.user}
           />
         )}
       </div>
