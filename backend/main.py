@@ -269,12 +269,16 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
                     }
                 }
 
-                models_to_try = ["gemini-1.5-pro", "gemini-1.5-flash"]
+                models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
                 for model_name in models_to_try:
-                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+                    headers = {
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": gemini_key
+                    }
                     try:
                         print(f"Attempting source analysis with model: {model_name}...")
-                        res = requests.post(gemini_url, json=gemini_payload, timeout=15)
+                        res = requests.post(gemini_url, json=gemini_payload, headers=headers, timeout=15)
                         if res.status_code == 200:
                             candidates = res.json().get("candidates", [])
                             if candidates:
@@ -399,14 +403,18 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
         }
     }
     
-    models_to_try = ["gemini-1.5-pro", "gemini-1.5-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
     last_err = None
     
     for model_name in models_to_try:
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        headers = {
+            "Content-Type": "application/json",
+            "x-goog-api-key": gemini_key
+        }
         try:
             print(f"Attempting script generation with model: {model_name}...")
-            res = requests.post(gemini_url, json=gemini_payload, timeout=30)
+            res = requests.post(gemini_url, json=gemini_payload, headers=headers, timeout=30)
             if res.status_code == 200:
                 candidates = res.json().get("candidates", [])
                 if not candidates:
