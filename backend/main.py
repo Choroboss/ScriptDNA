@@ -345,21 +345,36 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
         )
     
     pacing_desc = "Punchy & Fast-Paced"
+    wpm = 170
     catchphrases = ["Socio", "Uff", "Brutal", "Literal"]
+    peak_mins = 2.5
+    
     if payload.ai_voice_profile:
         pacing_desc = payload.ai_voice_profile.linguistic_pacing
+        wpm = payload.ai_voice_profile.words_per_minute
         catchphrases = payload.ai_voice_profile.catchphrases
         
-    catchphrases_str = ", ".join([f'"{c}"' for c in catchphrases])
+        if payload.ai_voice_profile.structural_patterns:
+            for pat in payload.ai_voice_profile.structural_patterns:
+                text = pat.get("text", "")
+                match = re.search(r"(\d+(?:\.\d+)?)\s*mins?", text, re.IGNORECASE)
+                if match:
+                    try:
+                        peak_mins = float(match.group(1))
+                        break
+                    except Exception:
+                        pass
+
+    catchphrases_str = ", ".join(catchphrases)
     
-    system_instruction = "You are a Linguistic Engineer and elite YouTube Scriptwriter. Your task is to write a highly engaging YouTube script based on the user's prompt, incorporating their unique style signatures (catchphrases, structural patterns, and pacing) naturally. You must also segment the script into blocks, identifying sections that have high viral retention potential to be extracted as standalone Shorts."
+    system_instruction = f"""You are an elite scriptwriter. You must write a YouTube script based on the user's prompt. 
+CRITICAL STYLE RULES TO IMITATE THE CREATOR:
+- Your tone and pacing must be strictly: {pacing_desc} (~{wpm} WPM).
+- You MUST naturally sprinkle the following exact catchphrases throughout the text as transition elements or fillers: {catchphrases_str}.
+- Structure: Ensure you include an intense hook in the first 15 seconds, and respect a peak retention pacing interval of {peak_mins} minutes."""
     
     prompt_text = f"""
     Write a YouTube script about: {payload.prompt}. 
-    
-    Linguistic style parameters:
-    - Pacing Style: {pacing_desc}
-    - Catchphrases to use naturally: {catchphrases_str}
     
     Split the generated script into 4 to 8 blocks. Identify 2 of them as high viral clip candidates.
     Ensure you follow the strict output schema containing the title, estimated_duration_mins, and blocks.
