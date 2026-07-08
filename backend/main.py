@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
 import re
 import urllib.request
 import json
@@ -186,7 +186,30 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
     gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
     
     try:
-        transcript_list = YouTubeTranscriptApi().fetch(video_id, languages=['es', 'en'])
+        try:
+            api = YouTubeTranscriptApi()
+            transcript_list_obj = api.list(video_id)
+            try:
+                # Try Spanish first, then fallback to English
+                transcript = transcript_list_obj.find_transcript(['es', 'en'])
+            except Exception:
+                # Fallback: grab any auto-generated or manually created transcript available
+                try:
+                    transcript = next(iter(transcript_list_obj))
+                except StopIteration:
+                    raise NoTranscriptFound(video_id)
+            transcript_list = transcript.fetch()
+        except (NoTranscriptFound, TranscriptsDisabled):
+            raise HTTPException(
+                status_code=400,
+                detail="Este video no cuenta con subtítulos habilitados en ningún idioma."
+            )
+        except Exception as transcript_err:
+            raise HTTPException(
+                status_code=400,
+                detail=f"No se pudieron cargar los subtítulos del video: {str(transcript_err)}"
+            )
+        
         full_text = " ".join([item.text for item in transcript_list])
         word_count = len(full_text.split())
         
@@ -283,6 +306,8 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
             "word_count": word_count,
             "analysis": analysis
         }
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
         error_msg = str(e)
         print(f"Failed to fetch YouTube transcript: {error_msg}")
