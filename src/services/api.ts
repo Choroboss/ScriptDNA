@@ -87,6 +87,54 @@ export async function fetchTrainingSources(): Promise<TrainingSource[]> {
   return response.data;
 }
 
+export interface SavedScript {
+  id: number;
+  title: string;
+  estimated_duration_mins: number;
+  updated_at: string;
+}
+
+/**
+ * Fetches all saved scripts for the logged-in user.
+ * GET /api/v1/scripts
+ */
+export async function fetchSavedScripts(): Promise<SavedScript[]> {
+  const response = await apiClient.get('/scripts');
+  return response.data;
+}
+
+/**
+ * Saves or updates a script document.
+ * POST /api/v1/scripts/save
+ */
+export async function saveScript(params: {
+  id?: number;
+  title: string;
+  estimated_duration_mins?: number;
+  blocks_json: string;
+}): Promise<{ success: boolean; id: number }> {
+  const response = await apiClient.post('/scripts/save', params);
+  return response.data;
+}
+
+/**
+ * Sends the current blocks and a refinement instruction to Gemini for iterative AI editing.
+ * POST /api/v1/scripts/refine
+ */
+export async function refineScript(params: {
+  script_id?: number;
+  blocks_json: string;
+  refinement_instruction: string;
+  ai_voice_profile?: {
+    linguistic_pacing: string;
+    words_per_minute: number;
+    catchphrases: string[];
+  };
+}): Promise<{ success: boolean; blocks: unknown[] }> {
+  const response = await apiClient.post('/scripts/refine', params);
+  return response.data;
+}
+
 /**
  * Uploads a text or docx script file to train the AI model.
  * POST /api/v1/training/upload-file

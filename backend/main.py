@@ -51,6 +51,17 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS saved_scripts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            estimated_duration_mins REAL DEFAULT 5.0,
+            blocks_json TEXT NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -98,6 +109,18 @@ class ScriptGenerateRequest(BaseModel):
     prompt: str
     ai_voice_profile: VoiceProfileSchema = None
     target_duration_mins: int = None
+
+class ScriptSaveRequest(BaseModel):
+    id: int = None
+    title: str
+    estimated_duration_mins: float = 5.0
+    blocks_json: str
+
+class ScriptRefineRequest(BaseModel):
+    script_id: int = None
+    blocks_json: str
+    refinement_instruction: str
+    ai_voice_profile: VoiceProfileSchema = None
 
 class RegisterRequest(BaseModel):
     name: str
@@ -717,3 +740,146 @@ async def get_training_sources(request: Request):
             "timestamp": formatted_date
         })
     return sources_list
+
+# --- Script Document Endpoints ---
+
+@app.get("/api/v1/scripts")
+async def get_saved_scripts(request: Request):
+    user_id = get_user_id_by_email(request.headers.get("X-User-Email"))
+    if not user_id:
+        return []
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, title, estimated_duration_mins, updated_at FROM saved_scripts WHERE user_id = ? ORDER BY updated_at DESC",
+        (user_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [
+        {"id": r[0], "title": r[1], "estimated_duration_mins": r[2], "updated_at": r[3]}
+        for r in rows
+    ]
+
+@app.get("/api/v1/scripts/{script_id}")
+async def get_single_script(script_id: int, request: Request):
+    user_id = get_user_id_by_email(request.headers.get("X-User-Email"))
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, title, estimated_duration_mins, blocks_json FROM saved_scripts WHERE id = ? AND user_id = ?",
+        (script_id, user_id)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Script not found.")
+    return {"id": row[0], "title": row[1], "estimated_duration_mins": row[2], "blocks_json": row[3]}
+
+@app.post("/api/v1/scripts/save")
+async def save_script(payload: ScriptSaveRequest, request: Request):
+    user_id = get_user_id_by_email(request.headers.get("X-User-Email"))
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required to save scripts.")
+    
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    if payload.id:
+        cursor.execute(
+            """UPDATE saved_scripts SET title=?, estimated_duration_mins=?, blocks_json=?, updated_at=CURRENT_TIMESTAMP
+               WHERE id=? AND user_id=?""",
+            (payload.title, payload.estimated_duration_mins, payload.blocks_json, payload.id, user_id)
+        )
+        script_id = payload.id
+    else:
+        cursor.execute(
+            "INSERT INTO saved_scripts (user_id, title, estimated_duration_mins, blocks_json) VALUES (?, ?, ?, ?)",
+            (user_id, payload.title, payload.estimated_duration_mins, payload.blocks_json)
+        )
+        script_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {"success": True, "id": script_id}
+
+@app.post("/api/v1/scripts/refine")
+async def refine_script(payload: ScriptRefineRequest, request: Request):
+    gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
+    if not gemini_key:
+        raise HTTPException(status_code=400, detail="Missing Gemini API Key. Configure it in Settings.")
+
+    pacing_desc = "Punchy & Fast-Paced"
+    wpm = 170
+    catchphrases = ["Socio", "Uff", "Brutal", "Literal"]
+    if payload.ai_voice_profile:
+        pacing_desc = payload.ai_voice_profile.linguistic_pacing
+        wpm = payload.ai_voice_profile.words_per_minute
+        catchphrases = payload.ai_voice_profile.catchphrases
+    catchphrases_str = ", ".join(catchphrases)
+
+    system_instruction = f"""You are an elite script editor. Your task is to refine an existing YouTube script.
+STRICT STYLE RULES (do NOT break these):
+- Maintain the creator's voice: {pacing_desc} (~{wpm} WPM).
+- Naturally weave these catchphrases throughout: {catchphrases_str}.
+- Return ONLY the updated blocks JSON array. Do not add explanation text.
+- Keep the same number of blocks and block types unless the instruction explicitly asks to merge or split."""
+
+    prompt_text = f"""Refinement instruction: "{payload.refinement_instruction}"
+
+Current script blocks JSON:
+{payload.blocks_json}
+
+Apply the instruction and return only the updated blocks JSON array, preserving the same schema with fields: text, is_viral_candidate, and clip_metadata (for viral blocks)."""
+
+    schema = {
+        "type": "ARRAY",
+        "items": {
+            "type": "OBJECT",
+            "properties": {
+                "text": {"type": "STRING"},
+                "is_viral_candidate": {"type": "BOOLEAN"},
+                "clip_metadata": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "short_title": {"type": "STRING"},
+                        "duration_shorts": {"type": "STRING"},
+                        "suggested_hook": {"type": "STRING"}
+                    }
+                }
+            },
+            "required": ["text", "is_viral_candidate"]
+        }
+    }
+
+    gemini_payload = {
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": schema
+        }
+    }
+
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    last_err = None
+    for model_name in models_to_try:
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
+        try:
+            print(f"Refining with model: {model_name}...")
+            res = requests.post(gemini_url, json=gemini_payload, headers=headers, timeout=30)
+            if res.status_code == 200:
+                candidates = res.json().get("candidates", [])
+                if candidates:
+                    text_out = candidates[0]["content"]["parts"][0]["text"]
+                    refined_blocks = json.loads(text_out)
+                    return {"success": True, "blocks": refined_blocks}
+            else:
+                last_err = f"Model {model_name} failed: {res.status_code}"
+                print(last_err)
+        except Exception as e:
+            last_err = str(e)
+            print(f"Model {model_name} exception: {e}")
+
+    raise HTTPException(status_code=500, detail=f"AI refinement failed: {last_err}")

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { generateScript } from '../services/api';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { generateScript, saveScript, fetchSavedScripts, refineScript } from '../services/api';
+import type { SavedScript } from '../services/api';
 
 interface ScriptBlock {
   id: string;
@@ -25,6 +26,37 @@ interface MyScriptsViewProps {
   onOpenAuthModal: () => void;
 }
 
+function blocksToApiFormat(blocks: ScriptBlock[]) {
+  return blocks.map((b) => ({
+    text: b.text,
+    is_viral_candidate: b.type === 'clip',
+    clip_metadata: b.clip_metadata,
+  }));
+}
+
+function apiBlocksToScriptBlocks(raw: any[]): ScriptBlock[] {
+  let clipIndex = 0;
+  return raw.map((block, idx) => {
+    if (block.is_viral_candidate) {
+      clipIndex += 1;
+      return {
+        id: `b-${idx}-${Date.now()}`,
+        type: 'clip' as const,
+        timecode: block.clip_metadata?.duration_shorts || '0:30s',
+        label: block.clip_metadata?.short_title || `Viral Clip Candidate #${clipIndex}`,
+        retention: 'High' as const,
+        text: block.text,
+        clip_metadata: block.clip_metadata,
+      };
+    }
+    return {
+      id: `b-${idx}-${Date.now()}`,
+      type: 'paragraph' as const,
+      text: block.text,
+    };
+  });
+}
+
 export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAuthenticated, onOpenAuthModal }) => {
   // Config state
   const [suspenseFreq, setSuspenseFreq] = useState(3);
@@ -36,166 +68,218 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
   const [promptText, setPromptText] = useState('');
   const [targetDuration, setTargetDuration] = useState(5);
   const [generating, setGenerating] = useState(false);
+  const [currentScriptId, setCurrentScriptId] = useState<number | null>(null);
 
+  // Document selector state
+  const [savedScripts, setSavedScripts] = useState<SavedScript[]>([]);
+  const [selectorOpen, setSelectorOpen] = useState(false);
+  const [loadingDoc, setLoadingDoc] = useState(false);
+
+  // Refinement state
+  const [refineMode, setRefineMode] = useState(false);
+  const [refinePrompt, setRefinePrompt] = useState('');
+  const [refining, setRefining] = useState(false);
+
+  // Autosave state
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved' | 'idle'>('idle');
+
+  // Script blocks state
+  const [blocks, setBlocks] = useState<ScriptBlock[]>([]);
+
+  // Load guest demo or blank canvas on auth change
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setBlocks([
+        { id: 'b1', type: 'paragraph', text: '[0:00] INT. NEON-LIT STUDIO - NIGHT\n\nThe year is 1999. The internet is screaming through 56k modems, CD players are skipping in your pocket, and Sega is about to make the biggest gamble in gaming history.' },
+        { id: 'b2', type: 'paragraph', text: 'They called it the Dreamcast. It was beautiful. It was ahead of its time. It had an actual modem built into it before most homes even understood what broadband was.' },
+        { id: 'b3', type: 'paragraph', text: 'But the dream was fragile. And a storm named PlayStation 2 was already brewing on the horizon.' },
+        { id: 'b4', type: 'clip', timecode: '0:45s', label: 'Viral Clip Candidate #1', retention: 'High', text: "[0:45] Ever wonder why the best console failed? Sega made one fatal error. They created the perfect machine for the future, but forgot they had to sell it in the present. The Dreamcast didn't die because it was bad; it died because it brought a modem to a movie fight." },
+        { id: 'b5', type: 'paragraph', text: "Let's back up to the Japanese launch. The initial stock shortages weren't a marketing ploy — they were a catastrophic manufacturing bottleneck with the PowerVR2 chip." },
+        { id: 'b6', type: 'clip', timecode: '0:38s', label: 'Viral Clip Candidate #2', retention: 'Med', text: '[2:15] 9-9-99. The American launch sold over 225,000 units in 24 hours, making $98 million. Bigger than Star Wars. But the hype couldn\'t save them from the structural rot that was already setting in from Tokyo.' },
+        { id: 'b7', type: 'paragraph', text: "Shenmue cost $47 million to produce. Yu Suzuki's masterpiece was pushing boundaries that wouldn't become standard for another decade. But when your install base is struggling, a $47M budget isn't an investment — it's an anchor." },
+      ]);
+      setScriptTitle('The Rise and Fall of Dreamcast.md');
+      setCurrentScriptId(null);
+      setSavedScripts([]);
+    } else {
+      setBlocks([]);
+      setScriptTitle('Untitled Script.md');
+      setCurrentScriptId(null);
+      // Load saved scripts list
+      fetchSavedScripts().then(setSavedScripts).catch(() => {});
+    }
+  }, [isAuthenticated]);
+
+  // Autosave debounce trigger
+  const triggerAutosave = useCallback(
+    (newBlocks: ScriptBlock[], title: string, scriptId: number | null) => {
+      if (!isAuthenticated || newBlocks.length === 0) return;
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      setSaveStatus('unsaved');
+      autosaveTimerRef.current = setTimeout(async () => {
+        setSaveStatus('saving');
+        try {
+          const blocks_json = JSON.stringify(blocksToApiFormat(newBlocks));
+          const cleanTitle = title.replace('.md', '').trim() || 'Untitled Script';
+          const result = await saveScript({
+            id: scriptId ?? undefined,
+            title: cleanTitle,
+            estimated_duration_mins: targetDuration,
+            blocks_json,
+          });
+          if (!scriptId && result.id) {
+            setCurrentScriptId(result.id);
+          }
+          setSaveStatus('saved');
+          // Refresh doc selector list
+          fetchSavedScripts().then(setSavedScripts).catch(() => {});
+        } catch {
+          setSaveStatus('unsaved');
+        }
+      }, 2000);
+    },
+    [isAuthenticated, targetDuration]
+  );
+
+  // Generate new script
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!promptText.trim()) return;
-
     setGenerating(true);
     try {
       const response = await generateScript(
         promptText.trim(),
-        {
-          linguistic_pacing: voiceProfile.linguistic_pacing,
-          words_per_minute: voiceProfile.words_per_minute,
-          catchphrases: voiceProfile.catchphrases,
-        },
+        { linguistic_pacing: voiceProfile.linguistic_pacing, words_per_minute: voiceProfile.words_per_minute, catchphrases: voiceProfile.catchphrases },
         targetDuration
       );
-
       if (response.success && response.script) {
         const script = response.script;
-        setScriptTitle(`${script.title}.md`);
-        
-        let clipIndex = 0;
-        const newBlocks: ScriptBlock[] = script.blocks.map((block, idx) => {
-          if (block.is_viral_candidate) {
-            clipIndex += 1;
-            return {
-              id: `b-${idx}-${Date.now()}`,
-              type: 'clip',
-              timecode: block.clip_metadata?.duration_shorts || '0:30s',
-              label: block.clip_metadata?.short_title || `Viral Clip Candidate #${clipIndex}`,
-              retention: 'High',
-              text: block.text,
-              clip_metadata: block.clip_metadata,
-            };
-          } else {
-            return {
-              id: `b-${idx}-${Date.now()}`,
-              type: 'paragraph',
-              text: block.text,
-            };
-          }
-        });
+        const newTitle = `${script.title}.md`;
+        const newBlocks = apiBlocksToScriptBlocks(script.blocks);
+        setScriptTitle(newTitle);
         setBlocks(newBlocks);
+        setCurrentScriptId(null); // new doc, will be created on autosave
         setPromptText('');
+        triggerAutosave(newBlocks, newTitle, null);
       }
     } catch (err: any) {
-      console.error('Failed to generate script', err);
-      alert(`AI Script generation failed: ${err?.message || 'Server error'}`);
+      alert(`AI Script generation failed: ${err?.response?.data?.detail || err?.message || 'Server error'}`);
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleRetentionClick = (e: React.MouseEvent) => {
-    if (!isAuthenticated) {
-      e.preventDefault();
-      e.stopPropagation();
-      onOpenAuthModal();
+  // Refine existing script
+  const handleRefine = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refinePrompt.trim() || blocks.length === 0) return;
+    setRefining(true);
+    try {
+      const result = await refineScript({
+        script_id: currentScriptId ?? undefined,
+        blocks_json: JSON.stringify(blocksToApiFormat(blocks)),
+        refinement_instruction: refinePrompt.trim(),
+        ai_voice_profile: { linguistic_pacing: voiceProfile.linguistic_pacing, words_per_minute: voiceProfile.words_per_minute, catchphrases: voiceProfile.catchphrases },
+      });
+      if (result.success && result.blocks) {
+        const newBlocks = apiBlocksToScriptBlocks(result.blocks as any[]);
+        setBlocks(newBlocks);
+        setRefinePrompt('');
+        triggerAutosave(newBlocks, scriptTitle, currentScriptId);
+      }
+    } catch (err: any) {
+      alert(`AI Refinement failed: ${err?.response?.data?.detail || err?.message || 'Server error'}`);
+    } finally {
+      setRefining(false);
     }
   };
 
-  // Script blocks state
-  const [blocks, setBlocks] = useState<ScriptBlock[]>([]);
-
-  useEffect(() => {
-    if (!isAuthenticated) {
-      setBlocks([
-        {
-          id: 'b1',
-          type: 'paragraph',
-          text: '[0:00] INT. NEON-LIT STUDIO - NIGHT\n\nThe year is 1999. The internet is screaming through 56k modems, CD players are skipping in your pocket, and Sega is about to make the biggest gamble in gaming history.',
+  // Load a saved script from the selector
+  const handleLoadScript = async (script: SavedScript) => {
+    setLoadingDoc(true);
+    setSelectorOpen(false);
+    try {
+      const res = await fetch(`http://localhost:8000/api/v1/scripts/${script.id}`, {
+        headers: {
+          'X-User-Email': JSON.parse(localStorage.getItem('scriptdna_user') || '{}')?.email || '',
         },
-        {
-          id: 'b2',
-          type: 'paragraph',
-          text: 'They called it the Dreamcast. It was beautiful. It was ahead of its time. It had an actual modem built into it before most homes even understood what broadband was.',
-        },
-        {
-          id: 'b3',
-          type: 'paragraph',
-          text: 'But the dream was fragile. And a storm named PlayStation 2 was already brewing on the horizon.',
-        },
-        {
-          id: 'b4',
-          type: 'clip',
-          timecode: '0:45s',
-          label: 'Viral Clip Candidate #1',
-          retention: 'High',
-          text: "[0:45] Ever wonder why the best console failed? Sega made one fatal error. They created the perfect machine for the future, but forgot they had to sell it in the present. They built the bridge to online gaming, but PlayStation 2 promised to play DVDs. And in 2000? A DVD player was worth its weight in gold. The Dreamcast didn't die because it was bad; it died because it brought a modem to a movie fight.",
-        },
-        {
-          id: 'b5',
-          type: 'paragraph',
-          text: "Let's back up to the Japanese launch. The initial stock shortages weren't a marketing ploy; they were a catastrophic manufacturing bottleneck with the PowerVR2 chip.",
-        },
-        {
-          id: 'b6',
-          type: 'clip',
-          timecode: '0:38s',
-          label: 'Viral Clip Candidate #2',
-          retention: 'Med',
-          text: '[2:15] The date every gamer remembers: September 9, 1999. 9-9-99. The American launch was a masterclass in hype. They sold over 225,000 units in 24 hours, making $98 million. It was the biggest 24 hours in entertainment retail history at the time. Bigger than Star Wars. But the hype couldn\'t save them from the structural rot that was already setting in from Tokyo.',
-        },
-        {
-          id: 'b7',
-          type: 'paragraph',
-          text: "Shenmue, arguably the crown jewel of the system, cost a staggering $47 million to produce. Yu Suzuki's masterpiece was pushing boundaries that wouldn't become standard for another decade. But when your install base is struggling, a $47 million budget isn't an investment; it's an anchor.",
-        },
-      ]);
-      setScriptTitle('The Rise and Fall of Dreamcast.md');
-    } else {
-      setBlocks([]);
-      setScriptTitle('Untitled Script.md');
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.blocks_json) {
+          const rawBlocks = JSON.parse(data.blocks_json);
+          setBlocks(apiBlocksToScriptBlocks(rawBlocks));
+          setScriptTitle(`${data.title}.md`);
+          setCurrentScriptId(script.id);
+        }
+      }
+    } catch {
+      // fallback: just set title/id
+      setScriptTitle(`${script.title}.md`);
+      setCurrentScriptId(script.id);
+    } finally {
+      setLoadingDoc(false);
     }
-  }, [isAuthenticated]);
+  };
 
-  // Statistics calculation
-  const [wordCount, setWordCount] = useState(1842);
-  const [durationText, setDurationText] = useState('12:45 min');
+  // Block text change (triggers autosave)
+  const handleBlockChange = (id: string, newText: string) => {
+    setBlocks((prev) => {
+      const updated = prev.map((b) => (b.id === id ? { ...b, text: newText } : b));
+      triggerAutosave(updated, scriptTitle, currentScriptId);
+      return updated;
+    });
+  };
 
+  const handleRetentionClick = (e: React.MouseEvent) => {
+    if (!isAuthenticated) { e.preventDefault(); e.stopPropagation(); onOpenAuthModal(); }
+  };
+
+  // Statistics
+  const [wordCount, setWordCount] = useState(0);
+  const [durationText, setDurationText] = useState('0:00 min');
   useEffect(() => {
-    // Dynamically calculate word count and duration based on block texts
-    const totalWords = blocks.reduce((acc, block) => {
-      const words = block.text.trim().split(/\s+/).filter(Boolean).length;
-      return acc + words;
-    }, 0);
+    const totalWords = blocks.reduce((acc, b) => acc + b.text.trim().split(/\s+/).filter(Boolean).length, 0);
     setWordCount(totalWords);
-
-    const totalMinutes = totalWords / 150; // standard speaking rate of 150 WPM
+    const totalMinutes = totalWords / 150;
     const minutes = Math.floor(totalMinutes);
     const seconds = Math.floor((totalMinutes - minutes) * 60);
     setDurationText(`${minutes}:${seconds < 10 ? '0' : ''}${seconds} min`);
   }, [blocks]);
-
-  const handleBlockChange = (id: string, newText: string) => {
-    setBlocks((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, text: newText } : b))
-    );
-  };
 
   const handleScanForClips = () => {
     if (scanning) return;
     setScanning(true);
     setTimeout(() => {
       setScanning(false);
-      // Append a new clip block
       const newClip: ScriptBlock = {
         id: `b-clip-${Date.now()}`,
         type: 'clip',
         timecode: '0:22s',
         label: 'Viral Clip Candidate #3',
         retention: 'High',
-        text: '[3:40] Yu Suzuki actually wanted Shenmue to be an RPG for the Sega Saturn. Think about that: putting a massive open-world game on a 32-bit dual-CPU architecture. It was literally madness. If they had scaled back the scope, Sega might still be in the console business today.',
+        text: '[3:40] Yu Suzuki actually wanted Shenmue to be an RPG for the Sega Saturn. Think about that: putting a massive open-world game on a 32-bit dual-CPU architecture. If they had scaled back the scope, Sega might still be in the console business today.',
       };
-      setBlocks((prev) => [...prev, newClip]);
+      setBlocks((prev) => { const updated = [...prev, newClip]; triggerAutosave(updated, scriptTitle, currentScriptId); return updated; });
     }, 1500);
   };
 
   const handleExportClip = (clip: ScriptBlock) => {
     alert(`Exporting Script for "${clip.label}":\n\n${clip.text}`);
+  };
+
+  const saveIndicatorColors: Record<typeof saveStatus, string> = {
+    idle: 'text-outline-variant',
+    saved: 'text-emerald-500',
+    saving: 'text-amber-400 animate-pulse',
+    unsaved: 'text-amber-400',
+  };
+  const saveIndicatorLabels: Record<typeof saveStatus, string> = {
+    idle: '',
+    saved: '✓ Saved',
+    saving: 'Saving...',
+    unsaved: '● Unsaved',
   };
 
   return (
@@ -204,9 +288,57 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
       <section className="flex-1 flex flex-col h-full bg-[#121212] relative border-r tech-border overflow-hidden">
         {/* Editor Top Bar */}
         <header className="h-16 border-b tech-border flex items-center justify-between px-6 sticky top-0 bg-[#121212]/90 backdrop-blur-sm z-30 flex-shrink-0">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
+            {/* Document selector dropdown */}
+            {isAuthenticated && (
+              <div className="relative">
+                <button
+                  onClick={() => { setSelectorOpen(!selectorOpen); if (!selectorOpen) fetchSavedScripts().then(setSavedScripts).catch(() => {}); }}
+                  className="flex items-center gap-1.5 text-outline-variant hover:text-on-surface transition-colors px-2 py-1 rounded hover:bg-surface-container-high"
+                  title="Your Saved Scripts"
+                >
+                  <span className="material-symbols-outlined text-[18px]">folder_open</span>
+                  <span className="text-xs font-mono">Docs</span>
+                  <span className="material-symbols-outlined text-[14px]">{selectorOpen ? 'expand_less' : 'expand_more'}</span>
+                </button>
+                {selectorOpen && (
+                  <div className="absolute top-full left-0 mt-1 w-72 bg-[#1a1a1a] border border-[#3f3f46] rounded-lg shadow-2xl z-50 overflow-hidden">
+                    <div className="px-3 py-2 border-b border-[#3f3f46] flex items-center justify-between">
+                      <span className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">Your Saved Scripts</span>
+                      <button
+                        onClick={() => { setBlocks([]); setScriptTitle('Untitled Script.md'); setCurrentScriptId(null); setSelectorOpen(false); }}
+                        className="text-xs text-primary hover:text-primary/80 flex items-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-[14px]">add</span>New
+                      </button>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto custom-scrollbar">
+                      {loadingDoc ? (
+                        <div className="p-4 text-center text-on-surface-variant text-sm">Loading...</div>
+                      ) : savedScripts.length === 0 ? (
+                        <div className="p-4 text-center text-on-surface-variant text-sm italic">No saved scripts yet</div>
+                      ) : (
+                        savedScripts.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => handleLoadScript(s)}
+                            className={`w-full text-left px-3 py-2.5 hover:bg-surface-container-high transition-colors border-b border-[#262626] last:border-0 ${currentScriptId === s.id ? 'bg-[#1e1b4b]/30' : ''}`}
+                          >
+                            <div className="text-sm text-on-surface truncate">{s.title}</div>
+                            <div className="text-xs text-on-surface-variant mt-0.5">{s.estimated_duration_mins}m · {s.updated_at?.split('T')[0]}</div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             <h2 className="font-headline-sm text-headline-sm text-on-surface font-semibold tracking-tight">{scriptTitle}</h2>
             <span className="px-2 py-0.5 rounded bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm uppercase tracking-wider">Draft</span>
+            {isAuthenticated && saveStatus !== 'idle' && (
+              <span className={`text-xs font-mono ${saveIndicatorColors[saveStatus]}`}>{saveIndicatorLabels[saveStatus]}</span>
+            )}
           </div>
           <div className="flex gap-6 items-center text-on-surface-variant font-label-md text-label-md">
             <div className="flex items-center gap-1.5">
@@ -217,26 +349,63 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
               <span className="material-symbols-outlined text-[16px]">schedule</span>
               <span>{durationText}</span>
             </div>
-            <button className="ml-4 px-3 py-1.5 border border-[#3f3f46] text-on-surface hover:border-[#fafafa] rounded text-label-sm transition-colors flex items-center gap-2 btn-interact">
-              <span className="material-symbols-outlined text-[16px]">history</span>
-              Version History
-            </button>
+            {isAuthenticated && (
+              <button
+                onClick={() => setRefineMode(!refineMode)}
+                className={`ml-2 px-3 py-1.5 border rounded text-label-sm transition-all flex items-center gap-2 btn-interact ${refineMode ? 'border-[#6366f1] text-[#818cf8] bg-[#1e1b4b]/40' : 'border-[#3f3f46] text-on-surface hover:border-[#fafafa]'}`}
+              >
+                <span className="material-symbols-outlined text-[16px]">auto_fix_high</span>
+                Refine with AI
+              </button>
+            )}
           </div>
         </header>
+
+        {/* Refinement Bar (conditional) */}
+        {isAuthenticated && refineMode && (
+          <div className="border-b tech-border bg-[#1a1524] px-6 py-3 flex gap-3 items-center">
+            {refining ? (
+              <div className="flex-1 flex items-center gap-3 text-[#818cf8]">
+                <span className="material-symbols-outlined text-[20px] animate-spin">sync</span>
+                <span className="text-sm font-medium italic animate-pulse">AI is polishing your draft...</span>
+              </div>
+            ) : (
+              <form onSubmit={handleRefine} className="flex flex-1 gap-3 items-center">
+                <span className="material-symbols-outlined text-[#6366f1] text-[20px]">auto_fix_high</span>
+                <input
+                  type="text"
+                  className="flex-1 bg-transparent border-none text-sm text-on-surface placeholder-[#6366f1]/60 outline-none focus:ring-0"
+                  placeholder='Tell the AI how to improve the script (e.g. "Make the hook punchier", "Rewrite block 3 in a more aggressive tone")'
+                  value={refinePrompt}
+                  onChange={(e) => setRefinePrompt(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={!refinePrompt.trim() || blocks.length === 0}
+                  className="bg-[#6366f1] text-white text-xs px-4 py-1.5 rounded font-bold hover:bg-[#4f52d1] disabled:opacity-40 transition-colors whitespace-nowrap"
+                >
+                  Apply Refinement
+                </button>
+                <button type="button" onClick={() => setRefineMode(false)} className="text-outline-variant hover:text-on-surface transition-colors">
+                  <span className="material-symbols-outlined text-[18px]">close</span>
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
         {/* AI Generation Prompt Input Panel */}
         <div className="border-b tech-border bg-surface-container-low px-6 py-4 flex gap-4 items-center">
           {isAuthenticated ? (
             <form onSubmit={handleGenerate} className="flex flex-1 gap-3 items-center">
-              <input 
-                type="text" 
-                className="flex-1 bg-surface-container-highest border border-outline-variant rounded px-4 py-2 text-body-md text-on-surface placeholder-on-surface-variant outline-none focus:border-indigo-accent transition-all focus:ring-0 text-white" 
-                placeholder="Enter a prompt to write a script (e.g. 'Write a script about Sega Dreamcast history')..."
+              <input
+                type="text"
+                className="flex-1 bg-surface-container-highest border border-outline-variant rounded px-4 py-2 text-body-md text-on-surface placeholder-on-surface-variant outline-none focus:border-indigo-accent transition-all focus:ring-0 text-white"
+                placeholder="Enter a prompt to generate a new script (e.g. 'Write a script about Sega Dreamcast history')..."
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
                 disabled={generating}
               />
-              
               <div className="flex items-center gap-2 bg-surface-container-highest border border-outline-variant rounded px-3 py-2 text-white">
                 <span className="text-[11px] uppercase tracking-wider text-on-surface-variant font-mono">Length:</span>
                 <select
@@ -251,9 +420,8 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                   <option className="bg-[#121212] text-white" value={15}>15 Mins</option>
                 </select>
               </div>
-
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={generating}
                 className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer whitespace-nowrap"
               >
@@ -264,7 +432,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
           ) : (
             <div className="flex flex-1 justify-between items-center bg-surface-container-highest/20 p-2.5 rounded border border-dashed border-outline-variant/60">
               <span className="text-body-md text-on-surface-variant italic">Viewing pre-loaded sample script ('The Rise and Fall of Dreamcast.md')</span>
-              <button 
+              <button
                 onClick={onOpenAuthModal}
                 className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer text-xs"
               >
@@ -283,10 +451,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
               {Array.from({ length: Math.max(blocks.length * 2, 12) }).map((_, idx) => (
                 <div key={idx} className="relative h-[24px] flex justify-end items-center">
                   {idx + 1 === 6 && hookReminder && (
-                    <span 
-                      className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[9px] w-2 h-2 rounded-full bg-[#6366f1] shadow-[0_0_8px_#6366f1] z-10" 
-                      title="2-Min Hook Rule triggered"
-                    ></span>
+                    <span className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-[9px] w-2 h-2 rounded-full bg-[#6366f1] shadow-[0_0_8px_#6366f1] z-10" title="2-Min Hook Rule triggered"></span>
                   )}
                   <span className={idx + 1 === 6 && hookReminder ? 'text-[#6366f1]' : ''}>{idx + 1}</span>
                 </div>
@@ -299,10 +464,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 blocks.map((block) => {
                   if (block.type === 'clip') {
                     return (
-                      <div 
-                        key={block.id} 
-                        className="relative p-4 -ml-4 -mr-4 bg-[#6366f1]/5 border border-dashed border-[#6366f1]/30 rounded group block-hover mt-4"
-                      >
+                      <div key={block.id} className="relative p-4 -ml-4 -mr-4 bg-[#6366f1]/5 border border-dashed border-[#6366f1]/30 rounded group block-hover mt-4">
                         <div className="absolute -top-3 right-4 bg-[#1e1b4b] text-[#818cf8] font-label-sm text-label-sm px-2 py-0.5 rounded border border-[#6366f1]/40 flex items-center gap-1">
                           <span className="material-symbols-outlined text-[14px]">auto_awesome</span>
                           {block.label}
@@ -369,17 +531,10 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
           {blocks
             .filter((b) => b.type === 'clip')
             .map((clip) => (
-              <div 
-                key={clip.id}
-                className="bg-[#171717] rounded-lg p-4 border tech-border relative group hover:border-[#3f3f46] transition-colors"
-              >
+              <div key={clip.id} className="bg-[#171717] rounded-lg p-4 border tech-border relative group hover:border-[#3f3f46] transition-colors">
                 <div className="flex justify-between items-start mb-3">
-                  <h4 className="font-headline-sm text-label-md text-on-surface font-semibold leading-tight pr-8 truncate">
-                    {clip.label}
-                  </h4>
-                  <span className="font-label-sm text-label-sm text-primary bg-[#1e1b4b] px-1.5 py-0.5 rounded absolute top-4 right-4">
-                    {clip.timecode || '0:00s'}
-                  </span>
+                  <h4 className="font-headline-sm text-label-md text-on-surface font-semibold leading-tight pr-8 truncate">{clip.label}</h4>
+                  <span className="font-label-sm text-label-sm text-primary bg-[#1e1b4b] px-1.5 py-0.5 rounded absolute top-4 right-4">{clip.timecode || '0:00s'}</span>
                 </div>
                 <div className="mb-4">
                   <span className="font-label-sm text-label-sm text-outline-variant uppercase tracking-wider block mb-1">Hook Analysis</span>
@@ -392,7 +547,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                     <span className={`w-2 h-2 rounded-full ${clip.retention === 'High' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
                     <span className="font-label-sm text-label-sm text-outline-variant">{clip.retention} Retention</span>
                   </div>
-                  <button 
+                  <button
                     onClick={() => handleExportClip(clip)}
                     className="text-primary font-label-md text-label-md hover:text-primary-fixed transition-colors flex items-center gap-1"
                   >
@@ -403,29 +558,22 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
             ))}
 
           {/* Scan for more clips Button */}
-          <button 
+          <button
             onClick={handleScanForClips}
             disabled={scanning}
             className={`mt-4 border border-dashed border-[#3f3f46] rounded-lg p-6 flex flex-col items-center justify-center text-center gap-3 hover:bg-[#171717]/50 transition-colors w-full ${scanning ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
           >
             <div className={`w-10 h-10 rounded-full bg-[#1e1b4b] flex items-center justify-center text-primary ${scanning ? 'animate-spin' : ''}`}>
-              <span className="material-symbols-outlined">
-                {scanning ? 'sync' : 'auto_awesome'}
-              </span>
+              <span className="material-symbols-outlined">{scanning ? 'sync' : 'auto_awesome'}</span>
             </div>
             <div>
-              <span className="font-label-md text-label-md text-on-surface block mb-1">
-                {scanning ? 'Scanning Script...' : 'Scan for more clips'}
-              </span>
-              <span className="font-body-md text-[12px] text-on-surface-variant">
-                {scanning ? 'Analyzing hook structure...' : 'AI will analyze the rest of the draft'}
-              </span>
+              <span className="font-label-md text-label-md text-on-surface block mb-1">{scanning ? 'Scanning Script...' : 'Scan for more clips'}</span>
+              <span className="font-body-md text-[12px] text-on-surface-variant">{scanning ? 'Analyzing hook structure...' : 'AI will analyze the rest of the draft'}</span>
             </div>
           </button>
         </div>
 
-        {/* LEFT BAR RETENTION CONTROLS (Rendered in Sidebar via React portal or layout) */}
-        {/* We place it in the MyScripts Sidebar Controls bottom block */}
+        {/* Retention Controls */}
         <div className="border-t border-outline-variant p-4 mt-auto">
           <div className="flex items-center justify-between w-full mb-3 text-on-surface-variant">
             <div className="flex items-center gap-3">
@@ -439,21 +587,11 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 <span>Suspense Frequency</span>
                 <span className="text-primary">{suspenseFreq === 3 ? 'High' : suspenseFreq === 2 ? 'Med' : 'Low'}</span>
               </label>
-              <input 
-                className="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary" 
-                max="3" 
-                min="1" 
-                type="range" 
-                value={suspenseFreq}
-                onChange={(e) => setSuspenseFreq(Number(e.target.value))}
-              />
+              <input className="w-full h-1 bg-surface-container-highest rounded-lg appearance-none cursor-pointer accent-primary" max="3" min="1" type="range" value={suspenseFreq} onChange={(e) => setSuspenseFreq(Number(e.target.value))} />
             </div>
             <div className="flex items-center justify-between">
               <span className="font-label-sm text-label-sm text-on-surface-variant">Hook Reminder (2m)</span>
-              <button 
-                onClick={() => setHookReminder(!hookReminder)}
-                className={`w-8 h-4 rounded-full relative transition-colors flex items-center p-0.5 ${hookReminder ? 'bg-primary' : 'bg-outline-variant'}`}
-              >
+              <button onClick={() => setHookReminder(!hookReminder)} className={`w-8 h-4 rounded-full relative transition-colors flex items-center p-0.5 ${hookReminder ? 'bg-primary' : 'bg-outline-variant'}`}>
                 <div className={`w-3 h-3 rounded-full absolute transition-transform bg-on-primary ${hookReminder ? 'right-0.5' : 'left-0.5'}`}></div>
               </button>
             </div>
