@@ -186,14 +186,14 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
     gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
     
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['es', 'en'])
-        full_text = " ".join([item['text'] for item in transcript_list])
+        transcript_list = YouTubeTranscriptApi().fetch(video_id, languages=['es', 'en'])
+        full_text = " ".join([item.text for item in transcript_list])
         word_count = len(full_text.split())
         
         duration_sec = 0
         if transcript_list:
             last_item = transcript_list[-1]
-            duration_sec = last_item.get('start', 0) + last_item.get('duration', 0)
+            duration_sec = last_item.start + last_item.duration
         
         minutes = int(duration_sec // 60)
         seconds = int(duration_sec % 60)
