@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>ScriptFlow AI | Style AI Training</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&amp;family=JetBrains+Mono:wght@400;500&amp;family=Geist:wght@400;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed": "#07006c",
+                        "on-tertiary": "#2f3037",
+                        "on-primary": "#1000a9",
+                        "on-background": "#e5e2e1",
+                        "primary-container": "#8083ff",
+                        "surface": "#131313",
+                        "outline": "#908fa0",
+                        "on-primary-fixed-variant": "#2f2ebe",
+                        "surface-bright": "#3a3939",
+                        "error": "#ffb4ab",
+                        "background": "#131313",
+                        "on-error-container": "#ffdad6",
+                        "surface-variant": "#353534",
+                        "secondary-container": "#454747",
+                        "error-container": "#93000a",
+                        "primary-fixed-dim": "#c0c1ff",
+                        "surface-container-highest": "#353534",
+                        "on-secondary": "#2f3131",
+                        "tertiary": "#c6c6cf",
+                        "outline-variant": "#464554",
+                        "on-tertiary-container": "#282930",
+                        "on-primary-container": "#0d0096",
+                        "inverse-primary": "#494bd6",
+                        "surface-dim": "#131313",
+                        "on-surface": "#e5e2e1",
+                        "on-secondary-fixed-variant": "#454747",
+                        "tertiary-fixed": "#e2e1eb",
+                        "inverse-surface": "#e5e2e1",
+                        "surface-container-lowest": "#0e0e0e",
+                        "surface-container-low": "#1c1b1b",
+                        "surface-container-high": "#2a2a2a",
+                        "on-secondary-fixed": "#1a1c1c",
+                        "surface-tint": "#c0c1ff",
+                        "surface-container": "#201f1f",
+                        "on-secondary-container": "#b4b5b5",
+                        "tertiary-fixed-dim": "#c6c6cf",
+                        "primary": "#c0c1ff",
+                        "on-tertiary-fixed": "#1a1b22",
+                        "secondary-fixed": "#e2e2e2",
+                        "on-error": "#690005",
+                        "tertiary-container": "#909099",
+                        "secondary-fixed-dim": "#c6c6c7",
+                        "on-surface-variant": "#c7c4d7",
+                        "primary-fixed": "#e1e0ff",
+                        "secondary": "#c6c6c7",
+                        "on-tertiary-fixed-variant": "#45464e",
+                        "inverse-on-surface": "#313030"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "unit": "4px",
+                        "margin-desktop": "40px",
+                        "container-max": "1440px",
+                        "sidebar-width": "260px",
+                        "margin-mobile": "16px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "headline-md": ["Geist"],
+                        "headline-sm": ["Geist"],
+                        "label-md": ["JetBrains Mono"],
+                        "display-lg": ["Geist"],
+                        "body-md": ["Inter"],
+                        "label-sm": ["JetBrains Mono"],
+                        "body-lg": ["Inter"]
+                    },
+                    "fontSize": {
+                        "headline-md": ["24px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "headline-sm": ["18px", {"lineHeight": "1.4", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "label-md": ["12px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "500"}],
+                        "display-lg": ["48px", {"lineHeight": "1.1", "letterSpacing": "-0.04em", "fontWeight": "700"}],
+                        "body-md": ["14px", {"lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400"}],
+                        "label-sm": ["10px", {"lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "400"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #131313;
+            color: #e5e2e1;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+        }
+        .glass-modal {
+            background: rgba(20, 20, 20, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="flex h-screen w-full overflow-hidden">
+<!-- BACKGROUND: Style AI Training Dashboard -->
+<div class="flex flex-1 blur-md transition-all duration-700 pointer-events-none opacity-50">
+<!-- SIDEBAR -->
+<aside class="fixed left-0 top-0 h-screen w-sidebar-width bg-background border-r border-outline-variant flex flex-col p-4 gap-4">
+<div class="mb-4">
+<span class="font-headline-sm text-headline-sm font-bold text-primary">ScriptFlow AI</span>
+<p class="text-[10px] uppercase tracking-widest text-on-surface-variant font-label-sm">Elite Creator Tier</p>
+</div>
+<nav class="flex flex-col gap-2">
+<div class="flex items-center gap-3 px-3 py-2 text-on-surface-variant font-body-md">
+<span class="material-symbols-outlined">dashboard</span>
+                    Dashboard
+                </div>
+<div class="flex items-center gap-3 px-3 py-2 text-on-surface-variant font-body-md">
+<span class="material-symbols-outlined">description</span>
+                    My Scripts
+                </div>
+<!-- ACTIVE TAB -->
+<div class="flex items-center gap-3 px-3 py-2 text-primary bg-secondary-container rounded-lg font-body-md">
+<span class="material-symbols-outlined">model_training</span>
+                    Style AI Training
+                </div>
+<div class="flex items-center gap-3 px-3 py-2 text-on-surface-variant font-body-md">
+<span class="material-symbols-outlined">settings</span>
+                    Settings
+                </div>
+</nav>
+<button class="mt-4 bg-primary text-on-primary-container py-2 px-4 rounded-lg font-bold flex items-center justify-center gap-2">
+<span class="material-symbols-outlined">add</span> New Script
+            </button>
+<div class="mt-auto border-t border-outline-variant pt-4 flex flex-col gap-4">
+<div class="flex flex-col gap-2">
+<div class="flex items-center gap-3 px-3 py-1 text-on-surface-variant font-label-md">
+<span class="material-symbols-outlined text-[18px]">analytics</span> Retention Rules
+                    </div>
+<div class="flex items-center gap-3 px-3 py-1 text-on-surface-variant font-label-md">
+<span class="material-symbols-outlined text-[18px]">help</span> Help
+                    </div>
+</div>
+<div class="p-3 bg-surface-container rounded-xl flex flex-col gap-2">
+<span class="text-xs font-label-md text-on-surface-variant">Guest Session</span>
+<div class="flex gap-2">
+<button class="text-xs bg-primary-container text-on-primary-container px-2 py-1 rounded">Log In</button>
+<button class="text-xs border border-outline-variant px-2 py-1 rounded">Register</button>
+</div>
+</div>
+</div>
+</aside>
+<!-- MAIN PANEL -->
+<main class="ml-sidebar-width flex-1 p-8 overflow-y-auto">
+<header class="mb-10 max-w-4xl mx-auto">
+<h1 class="font-headline-md text-headline-md text-on-surface mb-2">Style AI Training</h1>
+<p class="text-on-surface-variant font-body-md">Clone your writing DNA by feeding our neural engine your best-performing content.</p>
+</header>
+<div class="max-w-4xl mx-auto grid grid-cols-12 gap-gutter">
+<!-- Upload Section -->
+<section class="col-span-12 border border-outline-variant border-dashed rounded-xl p-12 flex flex-col items-center justify-center bg-surface-container-low">
+<span class="material-symbols-outlined text-4xl text-primary mb-4">upload_file</span>
+<h3 class="font-headline-sm text-headline-sm mb-1">Upload Past Scripts</h3>
+<p class="text-on-surface-variant font-body-md mb-6">PDF, .txt, or Word documents. Maximum 50 files.</p>
+<button class="border border-primary text-primary px-6 py-2 rounded-lg font-label-md uppercase tracking-wider">Browse Files</button>
+</section>
+<!-- YouTube Section -->
+<section class="col-span-12 bg-surface-container rounded-xl p-6 border border-outline-variant">
+<h3 class="font-headline-sm text-headline-sm mb-4">Paste YouTube Video Link</h3>
+<div class="flex gap-4">
+<input class="flex-1 bg-surface-container-lowest border-b border-outline-variant text-on-surface focus:border-primary transition-all p-3 outline-none font-body-md" placeholder="https://youtube.com/watch?v=..." type="text"/>
+<button class="bg-secondary-container text-on-surface px-6 py-2 rounded-lg font-label-md uppercase">Analyze Link</button>
+</div>
+</section>
+<!-- DNA Profile Metrics -->
+<section class="col-span-12">
+<h3 class="font-headline-sm text-headline-sm mb-4">Writing DNA Profile</h3>
+<div class="grid grid-cols-3 gap-gutter">
+<div class="bg-surface-container-high p-6 rounded-xl border border-outline-variant">
+<span class="text-on-surface-variant font-label-sm uppercase tracking-widest block mb-2">Tone</span>
+<div class="h-1 bg-surface-variant w-full mb-4 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-[78%]"></div>
+</div>
+<span class="font-headline-sm text-headline-sm">Analytical / Clinical</span>
+</div>
+<div class="bg-surface-container-high p-6 rounded-xl border border-outline-variant">
+<span class="text-on-surface-variant font-label-sm uppercase tracking-widest block mb-2">Pacing</span>
+<div class="h-1 bg-surface-variant w-full mb-4 rounded-full overflow-hidden">
+<div class="bg-primary h-full w-[62%]"></div>
+</div>
+<span class="font-headline-sm text-headline-sm">High-Frequency</span>
+</div>
+<div class="bg-surface-container-high p-6 rounded-xl border border-outline-variant">
+<span class="text-on-surface-variant font-label-sm uppercase tracking-widest block mb-2">Catchphrases</span>
+<div class="mt-2 flex flex-wrap gap-2">
+<span class="bg-primary-container/10 border border-primary/20 text-primary text-[10px] px-2 py-0.5 rounded uppercase font-label-md">Technically Speaking</span>
+<span class="bg-primary-container/10 border border-primary/20 text-primary text-[10px] px-2 py-0.5 rounded uppercase font-label-md">Deep Dive</span>
+</div>
+</div>
+</div>
+</section>
+</div>
+</main>
+</div>
+<!-- FOREGROUND: Auth Modal Overlay -->
+<div class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/40">
+<div class="glass-modal w-full max-w-md rounded-2xl overflow-hidden relative shadow-2xl animate-in fade-in zoom-in duration-300">
+<!-- Close Button -->
+<button class="absolute top-4 right-4 text-on-surface-variant hover:text-on-surface transition-colors">
+<span class="material-symbols-outlined">close</span>
+</button>
+<!-- Modal Content -->
+<div class="p-8">
+<header class="text-center mb-8">
+<div class="w-12 h-12 bg-primary/20 rounded-xl flex items-center justify-center mx-auto mb-4">
+<span class="material-symbols-outlined text-primary text-3xl">auto_fix_high</span>
+</div>
+<h2 class="font-headline-md text-headline-md text-on-surface">Welcome to ScriptFlow</h2>
+<p class="text-on-surface-variant font-body-md mt-1">Unlock AI models trained on your unique voice.</p>
+</header>
+<!-- Tab Switcher -->
+<div class="flex gap-6 justify-center mb-8 border-b border-outline-variant">
+<button class="pb-3 px-2 font-label-md uppercase tracking-wider text-primary border-b-2 border-primary">
+                        [ Log In ]
+                    </button>
+<button class="pb-3 px-2 font-label-md uppercase tracking-wider text-on-surface-variant hover:text-on-surface transition-colors">
+                        [ Register ]
+                    </button>
+</div>
+<!-- Form Inputs -->
+<form class="flex flex-col gap-4">
+<div class="space-y-1">
+<label class="font-label-sm uppercase tracking-widest text-on-surface-variant px-1">Email Address</label>
+<input class="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600" placeholder="creator@scriptflow.ai" type="email"/>
+</div>
+<div class="space-y-1">
+<label class="font-label-sm uppercase tracking-widest text-on-surface-variant px-1">Password</label>
+<input class="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600" placeholder="••••••••" type="password"/>
+</div>
+<button class="w-full bg-primary text-on-primary-container font-headline-sm py-4 rounded-xl mt-4 hover:opacity-90 transition-all active:scale-[0.98]" type="submit">
+                        Continue with Email
+                    </button>
+</form>
+<div class="flex items-center my-6 gap-4">
+<div class="h-[1px] flex-1 bg-outline-variant"></div>
+<span class="font-label-sm text-on-surface-variant uppercase">Or</span>
+<div class="h-[1px] flex-1 bg-outline-variant"></div>
+</div>
+<!-- Social Auth -->
+<div class="flex flex-col gap-3">
+<button class="w-full flex items-center justify-center gap-3 bg-surface-container-high border border-outline-variant text-on-surface py-3 rounded-xl hover:bg-surface-bright transition-colors font-body-md">
+<img class="w-5 h-5" data-alt="A stylized Google logo in vector format, clean and minimalist on a dark surface background, high-end tech aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCG-8x2mxgIf1p-LX4um0IaoYTqk93aGZVNBsB35mJ7C68gRWBJkMnD1o-G8GHpuONEN3sdyjcUKHufYIhEYS8ob7Ud7YL1LqF--GuU3EJR3BvUx57Xa6-gfljncvjiXKGeay5Lu11tptlq-Ju8XpEFAW8SR1XSIUFLOA8VALTNdKGrFWC1nzmADuO-OBVm7ZUjBa8A5lTGV8nNyJkgH4ahMhE1XdYjlVE_hf7KJI3P-2HDg-HorK6G1UBEHUHVnnHwM_PLrfrb0g"/>
+                        Continue with Google
+                    </button>
+<button class="w-full flex items-center justify-center gap-3 bg-surface-container-high border border-outline-variant text-on-surface py-3 rounded-xl hover:bg-surface-bright transition-colors font-body-md">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">apps</span>
+                        Continue with Apple
+                    </button>
+</div>
+<footer class="mt-8 text-center">
+<p class="text-xs text-on-surface-variant font-body-md">
+                        By continuing, you agree to our <a class="underline hover:text-primary transition-colors" href="#">Terms of Service</a> and <a class="underline hover:text-primary transition-colors" href="#">Privacy Policy</a>.
+                    </p>
+</footer>
+</div>
+</div>
+</div>
+<!-- Atmospheric Glow -->
+<div class="fixed top-0 right-0 -z-10 w-[600px] h-[600px] bg-primary/5 blur-[150px] pointer-events-none"></div>
+<div class="fixed bottom-0 left-0 -z-10 w-[400px] h-[400px] bg-primary/5 blur-[120px] pointer-events-none"></div>
+<script>
+        // Micro-interaction: Smooth modal hover effect
+        const modal = document.querySelector('.glass-modal');
+        document.addEventListener('mousemove', (e) => {
+            const xAxis = (window.innerWidth / 2 - e.pageX) / 80;
+            const yAxis = (window.innerHeight / 2 - e.pageY) / 80;
+            modal.style.transform = `rotateY(${xAxis}deg) rotateX(${yAxis}deg)`;
+        });
+
+        // Tab Switching Simulation
+        const tabs = document.querySelectorAll('button[font-label-md]');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => {
+                    t.classList.remove('text-primary', 'border-b-2', 'border-primary');
+                    t.classList.add('text-on-surface-variant');
+                });
+                tab.classList.remove('text-on-surface-variant');
+                tab.classList.add('text-primary', 'border-b-2', 'border-primary');
+            });
+        });
+    </script>
+</body></html>
