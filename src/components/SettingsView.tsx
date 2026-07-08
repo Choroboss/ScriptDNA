@@ -203,7 +203,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="mt-6 p-4 bg-primary/5 border-l-2 border-primary flex gap-4">
             <span className="material-symbols-outlined text-primary">verified_user</span>
             <p className="text-xs text-primary/80 leading-relaxed font-body-md">
-              Your API keys are encrypted locally on this device. ScriptFlow uses your keys to run research and script generation directly through provider endpoints without adding token markups or intermediate logging.
+              Your API keys are encrypted locally on this device. ScriptDNA uses your keys to run research and script generation directly through provider endpoints without adding token markups or intermediate logging.
             </p>
           </div>
         </div>

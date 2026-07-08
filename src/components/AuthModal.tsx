@@ -91,7 +91,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
             <div className="w-12 h-12 bg-primary/20 rounded-xl flex items-center justify-center mx-auto mb-4">
               <span className="material-symbols-outlined text-primary text-3xl">auto_fix_high</span>
             </div>
-            <h2 className="font-headline-md text-headline-md text-on-surface">Welcome to ScriptFlow</h2>
+            <h2 className="font-headline-md text-headline-md text-on-surface">Welcome to ScriptDNA</h2>
             <p className="text-on-surface-variant font-body-md mt-1">Unlock AI models trained on your unique voice.</p>
           </header>
 
@@ -145,7 +145,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onClose, onLoginSuccess })
               <label className="font-label-sm uppercase tracking-widest text-on-surface-variant px-1">Email Address</label>
               <input 
                 className="w-full bg-surface-container-low border border-outline-variant rounded-lg p-3 text-on-surface focus:border-primary transition-all outline-none font-body-md placeholder:text-zinc-600 focus:ring-0 text-white" 
-                placeholder="creator@scriptflow.ai" 
+                placeholder="creator@scriptdna.ai" 
                 type="email"
                 required
                 value={email}

@@ -71,7 +71,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Dashboard
     'dashboard.welcome': 'Welcome back',
-    'dashboard.guest': 'to ScriptFlow AI',
+    'dashboard.guest': 'to ScriptDNA',
 
     // Settings
     'settings.title': 'Settings',
@@ -140,7 +140,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Dashboard
     'dashboard.welcome': 'Bienvenido de vuelta',
-    'dashboard.guest': 'a ScriptFlow AI',
+    'dashboard.guest': 'a ScriptDNA',
 
     // Settings
     'settings.title': 'Configuración',

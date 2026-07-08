@@ -44,7 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </span>
         </div>
         <div className="flex flex-col">
-          <span className="font-headline-sm text-headline-sm font-bold text-primary">ScriptFlow AI</span>
+          <span className="font-headline-sm text-headline-sm font-bold text-primary">ScriptDNA</span>
           <span className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">
             {auth.user ? auth.user.tier : t('nav.guestSession')}
           </span>
