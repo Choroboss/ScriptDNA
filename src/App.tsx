@@ -5,7 +5,7 @@ import { DashboardView } from './components/DashboardView';
 import { MyScriptsView } from './components/MyScriptsView';
 import { StyleAiTrainingView } from './components/StyleAiTrainingView';
 import { SettingsView } from './components/SettingsView';
-import { fetchVoiceProfile } from './services/api';
+import { fetchVoiceProfile, fetchTrainingSources } from './services/api';
 import type { TrainingSource } from './services/api';
 
 // --- Local Storage BYOK Encrypted Wrapper ---
@@ -100,8 +100,22 @@ function App() {
     }
   };
 
+  const refreshTrainingSources = async () => {
+    if (auth.user) {
+      try {
+        const list = await fetchTrainingSources();
+        setSources(list);
+      } catch (err) {
+        console.error('Failed to fetch training sources', err);
+      }
+    } else {
+      setSources([]);
+    }
+  };
+
   useEffect(() => {
     refreshVoiceProfile();
+    refreshTrainingSources();
   }, [auth.user]);
 
   // Training sources state (table data)
@@ -209,6 +223,7 @@ function App() {
               setVoiceProfile({ linguistic_pacing: pacing, words_per_minute: wpm, catchphrases })
             }
             onRefreshVoiceProfile={refreshVoiceProfile}
+            onRefreshTrainingSources={refreshTrainingSources}
           />
         )}
 

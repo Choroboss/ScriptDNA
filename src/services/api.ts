@@ -79,6 +79,15 @@ export async function fetchVoiceProfile(): Promise<VoiceDNASignatures> {
 }
 
 /**
+ * Fetches the user's saved training sources list from the database.
+ * GET /api/v1/training/sources
+ */
+export async function fetchTrainingSources(): Promise<TrainingSource[]> {
+  const response = await apiClient.get('/training/sources');
+  return response.data;
+}
+
+/**
  * Uploads a text or docx script file to train the AI model.
  * POST /api/v1/training/upload-file
  */

@@ -38,6 +38,19 @@ def init_db():
             confidence_level INTEGER DEFAULT 94
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS training_sources (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            source_name TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            content_text TEXT NOT NULL,
+            word_count INTEGER NOT NULL,
+            duration_mins REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -111,6 +124,16 @@ def extract_youtube_video_id(url: str) -> str:
         return cleaned
     
     return None
+
+def get_user_id_by_email(email: str) -> int:
+    if not email:
+        return None
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id FROM users WHERE email = ?", (email.strip().lower(),))
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else None
 
 def fetch_youtube_video_title(video_id: str) -> str:
     url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -325,17 +348,59 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
             except Exception as gem_ex:
                 print(f"Gemini API analysis failed completely: {gem_ex}")
         
-        # 1. Math-based WPM calculation
-        duration_mins = (duration_sec / 60.0) if duration_sec > 0 else 1.0
-        calculated_wpm = int(word_count / duration_mins)
+        # 1. Save new source to database if user is logged in
+        user_email = request.headers.get("X-User-Email")
+        user_id = get_user_id_by_email(user_email)
+        
+        if user_id:
+            try:
+                conn = sqlite3.connect(DATABASE)
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO training_sources (user_id, source_name, source_type, content_text, word_count, duration_mins)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (user_id, title, "youtube", full_text, word_count, duration_sec / 60.0)
+                )
+                conn.commit()
+                conn.close()
+            except Exception as db_err:
+                print(f"Failed to insert training source: {db_err}")
+
+        # 2. Cumulative Learning: Query all training sources for this user to compute aggregated signature
+        combined_text = full_text
+        combined_word_count = word_count
+        combined_duration_mins = duration_sec / 60.0 if duration_sec > 0 else 1.0
+        
+        if user_id:
+            try:
+                conn = sqlite3.connect(DATABASE)
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT content_text, word_count, duration_mins FROM training_sources WHERE user_id = ?",
+                    (user_id,)
+                )
+                rows = cursor.fetchall()
+                conn.close()
+                
+                if rows:
+                    combined_text = " ".join([r[0] for r in rows])
+                    combined_word_count = sum([r[1] for r in rows])
+                    combined_duration_mins = sum([r[2] for r in rows])
+            except Exception as db_err:
+                print(f"Failed to load training sources for aggregation: {db_err}")
+
+        # 3. Math-based WPM calculation (aggregated)
+        calculated_wpm = int(combined_word_count / (combined_duration_mins if combined_duration_mins > 0 else 1.0))
         if calculated_wpm < 50:
             calculated_wpm = 150
         elif calculated_wpm > 300:
             calculated_wpm = 170
             
-        # 2. Clean Frequency Counter for Catchphrases
+        # 4. Clean Frequency Counter for Catchphrases (aggregated)
         stop_words = {'que', 'el', 'un', 'los', 'para', 'como', 'de', 'y', 'a', 'la', 'en', 'es', 'del', 'al', 'se', 'por', 'con', 'no', 'mi', 'su', 'o', 'lo', 'si', 'sus', 'me', 'le', 'te', 'nos', 'este', 'esta', 'estos', 'estas', 'una', 'unas', 'unos', 'bien', 'muy', 'pero', 'mas', 'más', 'o', 'u', 'porqué', 'porque'}
-        words = re.findall(r'[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]{3,}', full_text.lower())
+        words = re.findall(r'[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]{3,}', combined_text.lower())
         filtered_words = [w for w in words if w not in stop_words]
         
         from collections import Counter
@@ -344,7 +409,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         if len(top_keywords) < 3:
             top_keywords = ["Socio", "Uff", "Literal", "Brutal"]
             
-        # 3. Override or initialize analysis data with authentic math results
+        # 5. Initialize or overwrite analysis data
         if not analysis:
             analysis = {
                 "linguistic_pacing": "Punchy & Fast-Paced" if calculated_wpm > 160 else "Slow & Explanatory",
@@ -361,7 +426,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
             analysis["words_per_minute"] = calculated_wpm
             analysis["catchphrases"] = top_keywords
             
-        # 4. Update the global profile state and SQLite DB
+        # 6. Update the global profile state and voice_profiles SQLite table
         USER_VOICE_PROFILE["catchphrases"] = top_keywords
         USER_VOICE_PROFILE["pacing"]["raw_wpm"] = calculated_wpm
         USER_VOICE_PROFILE["pacing"]["wpm"] = f"{calculated_wpm - 10}-{calculated_wpm + 10}"
@@ -376,7 +441,6 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         ]
         USER_VOICE_PROFILE["structuralPatterns"] = struct_patterns_list
         
-        user_email = request.headers.get("X-User-Email")
         if user_email:
             try:
                 conn = sqlite3.connect(DATABASE)
@@ -616,3 +680,40 @@ async def get_voice_profile(request: Request):
         "structuralPatterns": struct_list,
         "confidenceLevel": conf
     }
+
+@app.get("/api/v1/training/sources")
+async def get_training_sources(request: Request):
+    user_email = request.headers.get("X-User-Email")
+    user_id = get_user_id_by_email(user_email)
+    if not user_id:
+        return []
+        
+    conn = sqlite3.connect(DATABASE)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, source_name, source_type, word_count, duration_mins, created_at FROM training_sources WHERE user_id = ? ORDER BY id DESC",
+        (user_id,)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    sources_list = []
+    for r in rows:
+        source_id, name, stype, words, dur, created = r
+        metrics_str = f"{int(dur)}:{int((dur - int(dur)) * 60):02d} mins transcribed" if stype == "youtube" else f"{words:,} words analyzed"
+        try:
+            date_part = created.split()[0]
+            yyyy, mm, dd = date_part.split("-")
+            formatted_date = f"{mm}/{dd}/{yyyy}"
+        except Exception:
+            formatted_date = "07/08/2026"
+            
+        sources_list.append({
+            "id": f"db-{source_id}",
+            "name": name,
+            "type": stype,
+            "status": "Indexed",
+            "metrics": metrics_str,
+            "timestamp": formatted_date
+        })
+    return sources_list

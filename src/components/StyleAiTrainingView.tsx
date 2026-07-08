@@ -10,6 +10,7 @@ interface StyleAiTrainingViewProps {
   onUpdateSource: (id: string, updates: Partial<TrainingSource>) => void;
   onUpdateVoiceProfile: (pacing: string, wpm: number, catchphrases: string[]) => void;
   onRefreshVoiceProfile?: () => void;
+  onRefreshTrainingSources?: () => void;
 }
 
 export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
@@ -20,6 +21,7 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
   onUpdateSource,
   onUpdateVoiceProfile,
   onRefreshVoiceProfile,
+  onRefreshTrainingSources,
 }) => {
   // Local uploader and fetch inputs states
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -177,6 +179,7 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
           // Sync changes to global state
           onUpdateVoiceProfile(ana.linguistic_pacing, ana.words_per_minute, ana.catchphrases);
           onRefreshVoiceProfile?.();
+          onRefreshTrainingSources?.();
         }
       }
     } catch (err: any) {
