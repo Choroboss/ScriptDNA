@@ -238,7 +238,6 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
                 {full_text[:4000]}
                 """
 
-                gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={gemini_key}"
                 schema = {
                     "type": "OBJECT",
                     "properties": {
@@ -269,15 +268,27 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
                         "responseSchema": schema
                     }
                 }
-                
-                res = requests.post(gemini_url, json=gemini_payload, timeout=10)
-                if res.status_code == 200:
-                    candidates = res.json().get("candidates", [])
-                    if candidates:
-                        text_out = candidates[0]["content"]["parts"][0]["text"]
-                        analysis = json.loads(text_out)
+
+                models_to_try = ["gemini-1.5-pro", "gemini-1.5-flash"]
+                for model_name in models_to_try:
+                    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+                    try:
+                        print(f"Attempting source analysis with model: {model_name}...")
+                        res = requests.post(gemini_url, json=gemini_payload, timeout=15)
+                        if res.status_code == 200:
+                            candidates = res.json().get("candidates", [])
+                            if candidates:
+                                text_out = candidates[0]["content"]["parts"][0]["text"]
+                                analysis = json.loads(text_out)
+                                break
+                            else:
+                                print(f"Model {model_name} returned empty candidates.")
+                        else:
+                            print(f"Model {model_name} failed with status {res.status_code}: {res.text}")
+                    except Exception as try_err:
+                        print(f"Model {model_name} exception: {try_err}")
             except Exception as gem_ex:
-                print(f"Gemini API analysis failed: {gem_ex}")
+                print(f"Gemini API analysis failed completely: {gem_ex}")
         
         if not analysis:
             analysis = {
@@ -379,7 +390,6 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
         "required": ["title", "estimated_duration_mins", "blocks"]
     }
 
-    gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={gemini_key}"
     gemini_payload = {
         "contents": [{"parts": [{"text": prompt_text}]}],
         "systemInstruction": {"parts": [{"text": system_instruction}]},
@@ -389,36 +399,38 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
         }
     }
     
-    try:
-        res = requests.post(gemini_url, json=gemini_payload, timeout=30)
-        if res.status_code != 200:
-            raise HTTPException(
-                status_code=res.status_code,
-                detail=f"Gemini API returned an error ({res.status_code}): {res.text}"
-            )
-        
-        candidates = res.json().get("candidates", [])
-        if not candidates:
-            raise HTTPException(
-                status_code=500,
-                detail="Gemini API returned an empty candidate list. No script could be generated."
-            )
+    models_to_try = ["gemini-1.5-pro", "gemini-1.5-flash"]
+    last_err = None
+    
+    for model_name in models_to_try:
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+        try:
+            print(f"Attempting script generation with model: {model_name}...")
+            res = requests.post(gemini_url, json=gemini_payload, timeout=30)
+            if res.status_code == 200:
+                candidates = res.json().get("candidates", [])
+                if not candidates:
+                    raise Exception("Empty candidate list returned by Gemini.")
+                    
+                text_out = candidates[0]["content"]["parts"][0]["text"]
+                generated_json = json.loads(text_out)
+                
+                return {
+                    "success": True,
+                    "script": generated_json
+                }
+            else:
+                last_err = f"Model {model_name} returned status {res.status_code}: {res.text}"
+                print(last_err)
+        except Exception as try_err:
+            last_err = f"Model {model_name} error: {str(try_err)}"
+            print(last_err)
             
-        text_out = candidates[0]["content"]["parts"][0]["text"]
-        generated_json = json.loads(text_out)
-        
-        return {
-            "success": True,
-            "script": generated_json
-        }
-    except Exception as gem_ex:
-        print(f"Gemini script generation failed: {gem_ex}")
-        if isinstance(gem_ex, HTTPException):
-            raise gem_ex
-        raise HTTPException(
-            status_code=500,
-            detail=f"Linguistic script writer failed: {str(gem_ex)}"
-        )
+    # If both models failed
+    raise HTTPException(
+        status_code=500,
+        detail=f"Linguistic script writer failed. Gemini API responses: {last_err}"
+    )
 
 # Mock upload route
 @app.post("/api/v1/training/upload-file")
