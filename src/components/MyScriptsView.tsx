@@ -34,6 +34,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
   // Script Generator state
   const [scriptTitle, setScriptTitle] = useState('The Rise and Fall of Dreamcast.md');
   const [promptText, setPromptText] = useState('');
+  const [targetDuration, setTargetDuration] = useState(5);
   const [generating, setGenerating] = useState(false);
 
   const handleGenerate = async (e: React.FormEvent) => {
@@ -42,11 +43,15 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
 
     setGenerating(true);
     try {
-      const response = await generateScript(promptText.trim(), {
-        linguistic_pacing: voiceProfile.linguistic_pacing,
-        words_per_minute: voiceProfile.words_per_minute,
-        catchphrases: voiceProfile.catchphrases,
-      });
+      const response = await generateScript(
+        promptText.trim(),
+        {
+          linguistic_pacing: voiceProfile.linguistic_pacing,
+          words_per_minute: voiceProfile.words_per_minute,
+          catchphrases: voiceProfile.catchphrases,
+        },
+        targetDuration
+      );
 
       if (response.success && response.script) {
         const script = response.script;
@@ -222,7 +227,7 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
         {/* AI Generation Prompt Input Panel */}
         <div className="border-b tech-border bg-surface-container-low px-6 py-4 flex gap-4 items-center">
           {isAuthenticated ? (
-            <form onSubmit={handleGenerate} className="flex flex-1 gap-3">
+            <form onSubmit={handleGenerate} className="flex flex-1 gap-3 items-center">
               <input 
                 type="text" 
                 className="flex-1 bg-surface-container-highest border border-outline-variant rounded px-4 py-2 text-body-md text-on-surface placeholder-on-surface-variant outline-none focus:border-indigo-accent transition-all focus:ring-0 text-white" 
@@ -231,10 +236,26 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 onChange={(e) => setPromptText(e.target.value)}
                 disabled={generating}
               />
+              
+              <div className="flex items-center gap-2 bg-surface-container-highest border border-outline-variant rounded px-3 py-2 text-white">
+                <span className="text-[11px] uppercase tracking-wider text-on-surface-variant font-mono">Length:</span>
+                <select
+                  value={targetDuration}
+                  onChange={(e) => setTargetDuration(Number(e.target.value))}
+                  disabled={generating}
+                  className="bg-transparent border-none text-xs text-primary font-bold outline-none cursor-pointer p-0 focus:ring-0 select-white"
+                >
+                  <option className="bg-[#121212] text-white" value={3}>3 Mins</option>
+                  <option className="bg-[#121212] text-white" value={5}>5 Mins</option>
+                  <option className="bg-[#121212] text-white" value={10}>10 Mins</option>
+                  <option className="bg-[#121212] text-white" value={15}>15 Mins</option>
+                </select>
+              </div>
+
               <button 
                 type="submit" 
                 disabled={generating}
-                className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer"
+                className="bg-indigo-accent text-white px-5 py-2 rounded font-bold hover:bg-indigo-accent/80 transition-colors flex items-center gap-2 btn-interact cursor-pointer whitespace-nowrap"
               >
                 <span className="material-symbols-outlined text-[18px]">magic_button</span>
                 {generating ? 'AI Generating...' : 'Write Script'}

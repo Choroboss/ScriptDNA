@@ -179,11 +179,13 @@ export interface VoiceProfileInput {
  */
 export async function generateScript(
   prompt: string,
-  voiceProfile?: VoiceProfileInput
+  voiceProfile?: VoiceProfileInput,
+  targetDurationMins?: number
 ): Promise<{ success: boolean; script: GeneratedScript }> {
   const response = await apiClient.post('/scripts/generate', {
     prompt,
     ai_voice_profile: voiceProfile,
+    target_duration_mins: targetDurationMins,
   });
   return response.data;
 }

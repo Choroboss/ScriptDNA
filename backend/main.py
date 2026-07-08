@@ -33,6 +33,21 @@ def init_db():
 # Initialize SQLite database
 init_db()
 
+USER_VOICE_PROFILE = {
+    "catchphrases": ["Socio", "Uff", "Literal", "Brutal", "Actually", "Insane"],
+    "pacing": {
+        "wpm": "160-180",
+        "description": "Punchy & Fast-Paced",
+        "raw_wpm": 170
+    },
+    "structuralPatterns": [
+        {"id": "pat-1", "text": "Hooks within first 15s consistently identified.", "completed": True},
+        {"id": "pat-2", "text": "Retention peaks every 2.5 mins (Visual B-Roll pattern).", "completed": True},
+        {"id": "pat-3", "text": "Outro Call-to-Action pattern identified.", "completed": False}
+    ],
+    "confidenceLevel": 94
+}
+
 app = FastAPI(title="ScriptDNA API", version="1.0.0")
 
 # Configure CORS to bridge the ports between React (5173) and FastAPI (8000)
@@ -58,6 +73,7 @@ class VoiceProfileSchema(BaseModel):
 class ScriptGenerateRequest(BaseModel):
     prompt: str
     ai_voice_profile: VoiceProfileSchema = None
+    target_duration_mins: int = None
 
 class RegisterRequest(BaseModel):
     name: str
@@ -294,11 +310,31 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
             except Exception as gem_ex:
                 print(f"Gemini API analysis failed completely: {gem_ex}")
         
+        # 1. Math-based WPM calculation
+        duration_mins = (duration_sec / 60.0) if duration_sec > 0 else 1.0
+        calculated_wpm = int(word_count / duration_mins)
+        if calculated_wpm < 50:
+            calculated_wpm = 150
+        elif calculated_wpm > 300:
+            calculated_wpm = 170
+            
+        # 2. Clean Frequency Counter for Catchphrases
+        stop_words = {'que', 'el', 'un', 'los', 'para', 'como', 'de', 'y', 'a', 'la', 'en', 'es', 'del', 'al', 'se', 'por', 'con', 'no', 'mi', 'su', 'o', 'lo', 'si', 'sus', 'me', 'le', 'te', 'nos', 'este', 'esta', 'estos', 'estas', 'una', 'unas', 'unos', 'bien', 'muy', 'pero', 'mas', 'más', 'o', 'u', 'porqué', 'porque'}
+        words = re.findall(r'[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]{3,}', full_text.lower())
+        filtered_words = [w for w in words if w not in stop_words]
+        
+        from collections import Counter
+        word_counts = Counter(filtered_words)
+        top_keywords = [w.capitalize() for w, count in word_counts.most_common(6)]
+        if len(top_keywords) < 3:
+            top_keywords = ["Socio", "Uff", "Literal", "Brutal"]
+            
+        # 3. Override or initialize analysis data with authentic math results
         if not analysis:
             analysis = {
-                "linguistic_pacing": "Punchy & Fast-Paced",
-                "words_per_minute": 172,
-                "catchphrases": ["Socio", "Uff", "Literal", "Brutal", "Actually", "Insane"],
+                "linguistic_pacing": "Punchy & Fast-Paced" if calculated_wpm > 160 else "Slow & Explanatory",
+                "words_per_minute": calculated_wpm,
+                "catchphrases": top_keywords,
                 "structural_patterns": {
                     "has_early_hooks": True,
                     "retention_peak_interval_mins": 2.5,
@@ -306,6 +342,23 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
                 },
                 "confidence_level": 94
             }
+        else:
+            analysis["words_per_minute"] = calculated_wpm
+            analysis["catchphrases"] = top_keywords
+            
+        # 4. Update the global profile state
+        USER_VOICE_PROFILE["catchphrases"] = top_keywords
+        USER_VOICE_PROFILE["pacing"]["raw_wpm"] = calculated_wpm
+        USER_VOICE_PROFILE["pacing"]["wpm"] = f"{calculated_wpm - 10}-{calculated_wpm + 10}"
+        USER_VOICE_PROFILE["pacing"]["description"] = analysis.get("linguistic_pacing", "Punchy & Fast-Paced")
+        USER_VOICE_PROFILE["confidenceLevel"] = analysis.get("confidence_level", 94)
+        
+        peak_val = analysis.get("structural_patterns", {}).get("retention_peak_interval_mins", 2.5)
+        USER_VOICE_PROFILE["structuralPatterns"] = [
+            {"id": "pat-1", "text": "Hooks within first 15s consistently identified.", "completed": analysis.get("structural_patterns", {}).get("has_early_hooks", True)},
+            {"id": "pat-2", "text": f"Retention peaks every {peak_val} mins (Visual B-Roll pattern).", "completed": True},
+            {"id": "pat-3", "text": f"Outro style: {analysis.get('structural_patterns', {}).get('outro_style', 'Short CTA with custom catchphrase')}", "completed": True}
+        ]
 
         return {
             "success": True,
@@ -367,11 +420,15 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
 
     catchphrases_str = ", ".join(catchphrases)
     
+    target_dur = payload.target_duration_mins or 5
+    target_words = int(target_dur * wpm)
+    
     system_instruction = f"""You are an elite scriptwriter. You must write a YouTube script based on the user's prompt. 
 CRITICAL STYLE RULES TO IMITATE THE CREATOR:
 - Your tone and pacing must be strictly: {pacing_desc} (~{wpm} WPM).
 - You MUST naturally sprinkle the following exact catchphrases throughout the text as transition elements or fillers: {catchphrases_str}.
-- Structure: Ensure you include an intense hook in the first 15 seconds, and respect a peak retention pacing interval of {peak_mins} minutes."""
+- Structure: Ensure you include an intense hook in the first 15 seconds, and respect a peak retention pacing interval of {peak_mins} minutes.
+- Constraint: The total word count of all generated blocks combined MUST be strictly around {target_words} words to guarantee an exact presentation time of {target_dur} minutes based on the creator's actual speech velocity."""
     
     prompt_text = f"""
     Write a YouTube script about: {payload.prompt}. 
@@ -472,16 +529,4 @@ async def upload_file():
 
 @app.get("/api/v1/profile/voice-dna")
 async def get_voice_dna():
-    return {
-        "catchphrases": ["Socio", "Uff", "Literal", "Brutal", "Actually", "Insane"],
-        "pacing": {
-            "wpm": "160-180",
-            "description": "Punchy & Fast-Paced"
-        },
-        "structuralPatterns": [
-            {"id": "pat-1", "text": "Hooks within first 15s consistently identified.", "completed": True},
-            {"id": "pat-2", "text": "Retention peaks every 2.5 mins (Visual B-Roll pattern).", "completed": True},
-            {"id": "pat-3", "text": "Outro Call-to-Action pattern identified.", "completed": False}
-        ],
-        "confidenceLevel": 94
-    }
+    return USER_VOICE_PROFILE
