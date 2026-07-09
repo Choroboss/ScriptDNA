@@ -11,11 +11,59 @@ import hashlib
 
 import os
 
+import os
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(BASE_DIR, "users.db")
 
+class HybridCursor:
+    def __init__(self, cursor, is_postgres):
+        self.cursor = cursor
+        self.is_postgres = is_postgres
+
+    def execute(self, query, params=()):
+        if self.is_postgres:
+            query = query.replace('?', '%s')
+        self.cursor.execute(query, params)
+
+    def fetchone(self):
+        return self.cursor.fetchone()
+
+    def fetchall(self):
+        return self.cursor.fetchall()
+        
+    @property
+    def lastrowid(self):
+        if self.is_postgres:
+            return getattr(self.cursor, 'lastrowid', None)
+        return self.cursor.lastrowid
+
+class HybridConnection:
+    def __init__(self, conn, is_postgres):
+        self.conn = conn
+        self.is_postgres = is_postgres
+
+    def cursor(self):
+        return HybridCursor(self.conn.cursor(), self.is_postgres)
+
+    def commit(self):
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+def get_db_connection():
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        return HybridConnection(conn, True)
+    else:
+        conn = sqlite3.connect(DATABASE)
+        return HybridConnection(conn, False)
+
 def init_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -93,7 +141,7 @@ app = FastAPI(title="ScriptDNA API", version="1.0.0")
 # Configure CORS to bridge the ports between React (5173) and FastAPI (8000)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:8000", "http://127.0.0.1:5173"],
+    allow_origin_regex=r".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -159,23 +207,42 @@ def extract_youtube_video_id(url: str) -> str:
 def get_user_id_by_email(email: str) -> int:
     if not email:
         return None
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT id FROM users WHERE email = ?", (email.strip().lower(),))
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
 
-def get_user_gemini_key(email: str) -> str:
-    """Retrieve the Gemini API key stored in this user's DB row. Returns None if not set."""
+def get_user_gemini_key(email: str, client_header_key: str = None) -> tuple[str, str]:
+    """
+    Dual-mode API Key lookup.
+    Returns (api_key, notice)
+    """
     if not email:
-        return None
-    conn = sqlite3.connect(DATABASE)
+        return None, None
+        
+    owner_email = os.getenv("OWNER_EMAIL", "vicente@example.com")
+    
+    if email.strip().lower() == owner_email.strip().lower():
+        # OWNER MODE
+        return os.getenv("GEMINI_API_KEY"), "Owner Mode: Using secure backend server key."
+        
+    # PUBLIC BYOK MODE
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT gemini_api_key FROM users WHERE email = ?", (email.strip().lower(),))
     row = cursor.fetchone()
     conn.close()
-    return row[0] if row and row[0] else None
+    
+    db_key = row[0] if row and row[0] else None
+    if db_key:
+        return db_key, None
+        
+    if client_header_key:
+        return client_header_key, "Your API Key is processed strictly in-memory to execute the request and is never persisted on our servers."
+        
+    return None, None
 
 def fetch_youtube_video_title(video_id: str) -> str:
     url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -196,7 +263,7 @@ def read_root():
 
 @app.post("/api/v1/auth/register")
 async def register(payload: RegisterRequest):
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     # Check if user already exists
@@ -239,7 +306,7 @@ async def register(payload: RegisterRequest):
 
 @app.post("/api/v1/auth/login")
 async def login(payload: LoginRequest):
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     
     cursor.execute(
@@ -274,7 +341,7 @@ async def save_user_keys(payload: SaveUserKeysRequest, request: Request):
     user_email = request.headers.get("X-User-Email", "").strip().lower()
     if not user_email:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "UPDATE users SET gemini_api_key = ? WHERE email = ?",
@@ -426,7 +493,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         
         if user_id:
             try:
-                conn = sqlite3.connect(DATABASE)
+                conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -447,7 +514,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         
         if user_id:
             try:
-                conn = sqlite3.connect(DATABASE)
+                conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT content_text, word_count, duration_mins FROM training_sources WHERE user_id = ?",
@@ -515,7 +582,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
         
         if user_email:
             try:
-                conn = sqlite3.connect(DATABASE)
+                conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute(
                     """
@@ -721,7 +788,7 @@ async def get_voice_profile(request: Request):
     if not user_email:
         return USER_VOICE_PROFILE
         
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT linguistic_pacing, words_per_minute, catchphrases, structural_patterns, confidence_level FROM voice_profiles WHERE user_email = ?",
@@ -762,7 +829,7 @@ async def get_training_sources(request: Request):
     if not user_id:
         return []
         
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT id, source_name, source_type, word_count, duration_mins, created_at FROM training_sources WHERE user_id = ? ORDER BY id DESC",
@@ -799,7 +866,7 @@ async def get_saved_scripts(request: Request):
     user_id = get_user_id_by_email(request.headers.get("X-User-Email"))
     if not user_id:
         return []
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT id, title, estimated_duration_mins, updated_at FROM saved_scripts WHERE user_id = ? ORDER BY updated_at DESC",
@@ -817,7 +884,7 @@ async def get_single_script(script_id: int, request: Request):
     user_id = get_user_id_by_email(request.headers.get("X-User-Email"))
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT id, title, estimated_duration_mins, blocks_json FROM saved_scripts WHERE id = ? AND user_id = ?",
@@ -835,7 +902,7 @@ async def save_script(payload: ScriptSaveRequest, request: Request):
     if not user_id:
         raise HTTPException(status_code=401, detail="Authentication required to save scripts.")
     
-    conn = sqlite3.connect(DATABASE)
+    conn = get_db_connection()
     cursor = conn.cursor()
     if payload.id:
         cursor.execute(
@@ -845,11 +912,8 @@ async def save_script(payload: ScriptSaveRequest, request: Request):
         )
         script_id = payload.id
     else:
-        cursor.execute(
-            "INSERT INTO saved_scripts (user_id, title, estimated_duration_mins, blocks_json) VALUES (?, ?, ?, ?)",
-            (user_id, payload.title, payload.estimated_duration_mins, payload.blocks_json)
-        )
-        script_id = cursor.lastrowid
+        cursor.execute("INSERT INTO saved_scripts (user_id, title, estimated_duration_mins, blocks_json) VALUES (?, ?, ?, ?) RETURNING id", (user_id, payload.title, payload.estimated_duration_mins, payload.blocks_json))
+        script_id = cursor.fetchone()[0]
     conn.commit()
     conn.close()
     return {"success": True, "id": script_id}
