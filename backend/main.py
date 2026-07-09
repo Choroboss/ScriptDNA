@@ -823,7 +823,7 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
     # SECURITY: Always fetch the key from the DB for the authenticated user.
     # Never trust a key sent in request headers — this prevents cross-user key leakage.
     user_email = request.headers.get("X-User-Email", "").strip().lower()
-    gemini_key = get_user_gemini_key(user_email)
+    gemini_key, _ = get_user_gemini_key(user_email)
 
     if gemini_key:
         print(f"DB key resolved for {user_email}: {gemini_key[:6]}...")
@@ -1179,7 +1179,7 @@ async def save_script(payload: ScriptSaveRequest, request: Request):
 async def refine_script(payload: ScriptRefineRequest, request: Request):
     # SECURITY: Fetch key from DB — never from headers
     user_email = request.headers.get("X-User-Email", "").strip().lower()
-    gemini_key = get_user_gemini_key(user_email)
+    gemini_key, _ = get_user_gemini_key(user_email)
     if not gemini_key:
         raise HTTPException(status_code=400, detail="Missing Gemini API Key. Please add your own Gemini Key in Settings to unlock generation.")
 
