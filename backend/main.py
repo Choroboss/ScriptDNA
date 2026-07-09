@@ -345,6 +345,10 @@ async def save_user_keys(payload: SaveUserKeysRequest, request: Request):
     user_email = request.headers.get("X-User-Email", "").strip().lower()
     if not user_email:
         raise HTTPException(status_code=401, detail="Authentication required.")
+    owner_email = os.getenv("OWNER_EMAIL", "vicente@example.com").strip().lower()
+    if user_email == owner_email:
+        # Owner uses server env key — no DB write needed
+        return {"success": True, "message": "Owner Mode: key is managed via server environment."}
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -364,10 +368,21 @@ async def get_user_key_status(request: Request):
     user_email = request.headers.get("X-User-Email", "").strip().lower()
     if not user_email:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    key = get_user_gemini_key(user_email)
-    return {
-        "gemini": "CONNECTED" if key else "MISSING",
-    }
+
+    owner_email = os.getenv("OWNER_EMAIL", "vicente@example.com").strip().lower()
+    if user_email == owner_email:
+        # Owner always has a key via server environment — report CONNECTED
+        has_key = bool(os.getenv("GEMINI_API_KEY"))
+        return {"gemini": "CONNECTED" if has_key else "MISSING"}
+
+    # For all other users: check their OWN DB row — never leak owner key
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT gemini_api_key FROM users WHERE email = ?", (user_email,))
+    row = cursor.fetchone()
+    conn.close()
+    has_key = bool(row and row[0])
+    return {"gemini": "CONNECTED" if has_key else "MISSING"}
 
 @app.post("/api/v1/training/ingest-youtube")
 async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
