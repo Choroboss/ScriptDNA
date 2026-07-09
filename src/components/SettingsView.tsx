@@ -17,6 +17,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
   const [saving, setSaving] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
+  // Read actual logged-in user from localStorage
+  const currentUser = (() => {
+    try {
+      const raw = localStorage.getItem('scriptdna_user');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  })();
+  const displayName = currentUser?.name || currentUser?.email?.split('@')[0] || 'User';
+  const displayEmail = currentUser?.email || '—';
+
   // On mount or auth change, fetch real key status from DB
   useEffect(() => {
     if (!isAuthenticated) {
@@ -138,11 +148,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="font-label-sm text-label-sm text-on-surface-variant block mb-1">Full Name</label>
-                  <div className="font-body-md text-body-md py-2 border-b border-outline-variant text-white">Vicente Aguirre</div>
+                  <div className="font-body-md text-body-md py-2 border-b border-outline-variant text-white">{displayName}</div>
                 </div>
                 <div>
                   <label className="font-label-sm text-label-sm text-on-surface-variant block mb-1">Email Address</label>
-                  <div className="font-body-md text-body-md py-2 border-b border-outline-variant text-white">vicente@example.com</div>
+                  <div className="font-body-md text-body-md py-2 border-b border-outline-variant text-white">{displayEmail}</div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
