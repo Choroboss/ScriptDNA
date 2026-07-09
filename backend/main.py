@@ -64,20 +64,23 @@ def get_db_connection():
 
 def init_db():
     conn = get_db_connection()
+    is_pg = isinstance(conn, HybridConnection) and conn.is_postgres
+    pk = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             tier TEXT DEFAULT 'PRO WRITER',
-            avatar_url TEXT
+            avatar_url TEXT,
+            gemini_api_key TEXT
         )
     """)
-    cursor.execute("""
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS voice_profiles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             user_email TEXT UNIQUE NOT NULL,
             linguistic_pacing TEXT DEFAULT 'Punchy & Fast-Paced',
             words_per_minute INTEGER DEFAULT 170,
@@ -86,9 +89,9 @@ def init_db():
             confidence_level INTEGER DEFAULT 94
         )
     """)
-    cursor.execute("""
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS training_sources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             user_id INTEGER NOT NULL,
             source_name TEXT NOT NULL,
             source_type TEXT NOT NULL,
@@ -99,9 +102,9 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
-    cursor.execute("""
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS saved_scripts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id {pk},
             user_id INTEGER NOT NULL,
             title TEXT NOT NULL,
             estimated_duration_mins REAL DEFAULT 5.0,
@@ -110,11 +113,12 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
-    # Migrate: add gemini_api_key if not present (idempotent)
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN gemini_api_key TEXT")
-    except Exception:
-        pass  # Column already exists
+    # Migrate: add gemini_api_key if not present (idempotent, only needed for SQLite)
+    if not is_pg:
+        try:
+            cursor.execute("ALTER TABLE users ADD COLUMN gemini_api_key TEXT")
+        except Exception:
+            pass  # Column already exists
     conn.commit()
     conn.close()
 
