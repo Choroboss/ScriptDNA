@@ -197,11 +197,75 @@ export interface VoiceAnalysis {
 }
 
 /**
- * Ingests a YouTube URL to extract transcript, pacing, and tone.
- * POST /api/v1/training/ingest-youtube
+ * Extracts the YouTube video ID from a URL.
+ */
+function extractYouTubeVideoId(url: string): string | null {
+  const patterns = [
+    /(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/,
+  ];
+  for (const pattern of patterns) {
+    const match = url.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Fetches a YouTube transcript from the browser using the youtube-transcript proxy API.
+ * This runs in the USER's browser so Railway's IP block doesn't apply.
+ */
+async function fetchYouTubeTranscriptFromBrowser(videoId: string): Promise<{ text: string; duration_mins: number }> {
+  // Use the public youtube-transcript API service
+  const res = await fetch(`https://api.kome.ai/api/tools/youtube-transcripts?video_id=${videoId}&format=true`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ video_id: videoId, format: true }),
+  });
+  if (!res.ok) {
+    // Fallback: try the timedtext endpoint directly
+    const langRes = await fetch(
+      `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`
+    );
+    if (langRes.ok) {
+      const data = await langRes.json();
+      const events = data?.events || [];
+      const text = events
+        .filter((e: any) => e.segs)
+        .flatMap((e: any) => e.segs.map((s: any) => s.utf8))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const lastEvent = events[events.length - 1];
+      const duration_mins = lastEvent ? (lastEvent.tStartMs + (lastEvent.dDurationMs || 0)) / 60000 : 5;
+      return { text, duration_mins };
+    }
+    throw new Error('No se pudieron cargar los subtítulos. Verifica que el video tenga subtítulos habilitados.');
+  }
+  const data = await res.json();
+  const text = (data?.transcript || '').replace(/\s+/g, ' ').trim();
+  return { text, duration_mins: 5 };
+}
+
+/**
+ * Ingests a YouTube URL: fetches the transcript from the browser (no Railway IP block)
+ * then sends the text to the backend for AI voice analysis.
+ * POST /api/v1/training/ingest-with-transcript
  */
 export async function ingestYouTubeUrl(url: string): Promise<{ success: boolean; source: TrainingSource; analysis?: VoiceAnalysis }> {
-  const response = await apiClient.post('/training/ingest-youtube', { url });
+  const videoId = extractYouTubeVideoId(url);
+  if (!videoId) throw new Error('URL de YouTube inválida.');
+
+  // Step 1: fetch transcript in the browser (bypasses IP blocks)
+  const { text, duration_mins } = await fetchYouTubeTranscriptFromBrowser(videoId);
+  if (!text || text.length < 50) throw new Error('El transcript está vacío o es demasiado corto para analizar.');
+
+  // Step 2: send to backend for storage + AI analysis
+  const response = await apiClient.post('/training/ingest-with-transcript', {
+    video_id: videoId,
+    url,
+    transcript_text: text,
+    duration_mins,
+  });
   return response.data;
 }
 
