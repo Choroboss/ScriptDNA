@@ -53,7 +53,7 @@ class HybridConnection:
         self.conn.close()
 
 def get_db_connection():
-    db_url = os.getenv("DATABASE_URL")
+    db_url = os.getenv("DATABASE_URL", "").strip()
     if db_url:
         import psycopg2
         conn = psycopg2.connect(db_url)
