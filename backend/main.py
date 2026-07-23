@@ -8,11 +8,21 @@ import json
 import requests
 import sqlite3
 import hashlib
-
+import random
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(BASE_DIR, "users.db")
+
+from typing import Optional
+
+class GenerateThumbnailRequest(BaseModel):
+    script_title: str
+    script_content: Optional[str] = ""
+    user_idea: Optional[str] = ""
+    person_features: Optional[str] = ""
+    background_idea: Optional[str] = ""
+    overlay_text: Optional[str] = ""
 
 class HybridCursor:
     def __init__(self, cursor, is_postgres):
@@ -1702,5 +1712,98 @@ async def get_performance_log(request: Request):
         })
 
     return {"success": True, "metrics": log_items}
+
+
+@app.post("/api/v1/scripts/generate-thumbnail")
+async def generate_thumbnail_studio(payload: GenerateThumbnailRequest, request: Request):
+    """
+    Crafts hyper-targeted 8K thumbnail prompts (Midjourney/DALL-E) and custom visual concepts
+    based on user ideas, character features, background ideas, and text overlays.
+    """
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    gemini_key, _ = get_user_gemini_key(user_email)
+    if not gemini_key:
+        raise HTTPException(status_code=400, detail="Missing Gemini API Key. Please configure your key in Settings.")
+
+    title = payload.script_title.replace(".md", "").strip()
+    user_idea = payload.user_idea.strip() if payload.user_idea else "Cinematic dramatic thumbnail concept"
+    person_features = payload.person_features.strip() if payload.person_features else "Expressive creator face showing shock or intense curiosity"
+    bg_idea = payload.background_idea.strip() if payload.background_idea else "High-tech studio with neon ambient lighting"
+    overlay_text = payload.overlay_text.strip() if payload.overlay_text else title
+
+    prompt_text = f"""You are a world-class YouTube Thumbnail Designer & Prompt Engineer.
+Generate 3 distinct, high-CTR YouTube thumbnail visual concepts and Midjourney image prompts based on these creator inputs:
+
+- SCRIPT TITLE: {title}
+- USER'S CORE CONCEPT: {user_idea}
+- CHARACTER/PERSON FEATURES: {person_features}
+- BACKGROUND & ENVIRONMENT: {bg_idea}
+- OVERLAY TEXT ON THUMBNAIL: "{overlay_text}"
+
+Return a JSON object matching the requested schema with:
+- options: Array of 3 concepts, each with:
+  - concept_name: Short name of the style (e.g. 'Dramatic High-Contrast', 'Hyper-Real 3D', 'Cinematic Dark')
+  - midjourney_prompt: Ready-to-use Midjourney/DALL-E prompt with 16:9 ratio and --v 6.0
+  - overlay_text_suggestion: Short punchy text (1-4 words max) to render on the image
+  - ctr_boost_reason: Brief explanation of why this visual triggers human curiosity."""
+
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "options": {
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "concept_name": {"type": "STRING"},
+                        "midjourney_prompt": {"type": "STRING"},
+                        "overlay_text_suggestion": {"type": "STRING"},
+                        "ctr_boost_reason": {"type": "STRING"}
+                    },
+                    "required": ["concept_name", "midjourney_prompt", "overlay_text_suggestion", "ctr_boost_reason"]
+                }
+            }
+        },
+        "required": ["options"]
+    }
+
+    gemini_payload = {
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": schema
+        }
+    }
+
+    models_to_try = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro-latest"]
+    last_err = None
+    for model_name in models_to_try:
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
+        try:
+            res = requests.post(gemini_url, json=gemini_payload, headers=headers, timeout=25)
+            if res.status_code == 200:
+                candidates = res.json().get("candidates", [])
+                if candidates:
+                    text_out = candidates[0]["content"]["parts"][0]["text"]
+                    data = json.loads(text_out)
+                    
+                    import urllib.parse
+                    options = data.get("options", [])
+                    for opt in options:
+                        raw_prompt = opt.get("midjourney_prompt", title)
+                        clean_prompt = f"YouTube thumbnail 16:9 ratio, {raw_prompt[:150]}"
+                        encoded_prompt = urllib.parse.quote(clean_prompt)
+                        seed = random.randint(1000, 99999)
+                        opt["image_url"] = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1280&height=720&seed={seed}&nologo=true"
+
+                    return {"success": True, "data": {"options": options}}
+            else:
+                last_err = f"Model {model_name} failed with status {res.status_code}"
+        except Exception as e:
+            last_err = str(e)
+
+    raise HTTPException(status_code=500, detail=f"Thumbnail prompt generation failed: {last_err}")
+
 
 

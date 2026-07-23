@@ -243,6 +243,33 @@ export async function fetchPerformanceLog(): Promise<{
 }
 
 /**
+ * Generates custom AI thumbnail prompt options based on user custom fields
+ * POST /api/v1/scripts/generate-thumbnail
+ */
+export async function generateThumbnailOptions(params: {
+  script_title: string;
+  script_content?: string;
+  user_idea?: string;
+  person_features?: string;
+  background_idea?: string;
+  overlay_text?: string;
+}): Promise<{
+  success: boolean;
+  data: {
+    options: Array<{
+      concept_name: string;
+      midjourney_prompt: string;
+      overlay_text_suggestion: string;
+      ctr_boost_reason: string;
+      image_url?: string;
+    }>;
+  };
+}> {
+  const response = await apiClient.post('/scripts/generate-thumbnail', params);
+  return response.data;
+}
+
+/**
  * Uploads a text or docx script file to train the AI model.
  * POST /api/v1/training/upload-file
  */

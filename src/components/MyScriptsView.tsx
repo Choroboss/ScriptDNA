@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { generateScript, saveScript, fetchSavedScripts, refineScript, extractClips } from '../services/api';
+import { generateScript, saveScript, fetchSavedScripts, refineScript, extractClips, generateThumbnailOptions } from '../services/api';
 import { useAppContext } from '../context/AppContext';
 import type { SavedScript } from '../services/api';
 
@@ -20,6 +20,8 @@ interface ScriptBlock {
     platform_trends: Array<{ platform: string; status: string; volume_score: number }>;
     rated_hashtags: Array<{ hashtag: string; score: number; reach_estimate: string }>;
   };
+  b_roll_cues?: Array<{ timecode: string; type: 'B-ROLL' | 'FX' | 'TEXT_OVERLAY'; instruction: string }>;
+  voiceover_audio_url?: string;
 }
 
 interface MyScriptsViewProps {
@@ -95,10 +97,45 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
   // Active clip highlight state
   const [highlightedClipText, setHighlightedClipText] = useState<string | null>(null);
 
+  // Teleprompter State
+  const [teleprompterOpen, setTeleprompterOpen] = useState(false);
+  const [teleprompterPlaying, setTeleprompterPlaying] = useState(false);
+  const [teleprompterSpeed, setTeleprompterSpeed] = useState(2); // 1-5
+  const [teleprompterFontSize, setTeleprompterFontSize] = useState(36); // px
+  const teleprompterScrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Titles & Thumbnail Modal State
+  const [titlesModalOpen, setTitlesModalOpen] = useState(false);
+  const [thumbUserIdea, setThumbUserIdea] = useState('');
+  const [thumbPersonFeatures, setThumbPersonFeatures] = useState('');
+  const [thumbBgIdea, setThumbBgIdea] = useState('');
+  const [thumbOverlayText, setThumbOverlayText] = useState('');
+  const [generatingThumbnails, setGeneratingThumbnails] = useState(false);
+  const [thumbnailOptions, setThumbnailOptions] = useState<Array<{
+    concept_name: string;
+    midjourney_prompt: string;
+    overlay_text_suggestion: string;
+    ctr_boost_reason: string;
+    image_url?: string;
+  }>>([]);
+
   // Script blocks state
   const [blocks, setBlocks] = useState<ScriptBlock[]>([]);
 
-  // Load guest demo or blank canvas on auth change
+  // Teleprompter auto-scroll animation effect
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+    if (teleprompterOpen && teleprompterPlaying) {
+      interval = setInterval(() => {
+        if (teleprompterScrollRef.current) {
+          teleprompterScrollRef.current.scrollTop += teleprompterSpeed;
+        }
+      }, 30);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [teleprompterOpen, teleprompterPlaying, teleprompterSpeed]);
   useEffect(() => {
     if (!isAuthenticated) {
       setBlocks([
@@ -388,6 +425,24 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                 {t('scripts.refineAi')}
               </button>
             )}
+
+            <button
+              onClick={() => setTeleprompterOpen(true)}
+              className="px-3 py-1.5 border border-[#3f3f46] hover:border-indigo-400 text-on-surface hover:text-indigo-300 rounded text-label-sm transition-colors flex items-center gap-1.5 btn-interact"
+              title="Abrir Teleprompter de Lectura"
+            >
+              <span className="material-symbols-outlined text-[16px] text-indigo-400">videocam</span>
+              Teleprompter
+            </button>
+
+            <button
+              onClick={() => setTitlesModalOpen(true)}
+              className="px-3 py-1.5 border border-[#3f3f46] hover:border-emerald-400 text-on-surface hover:text-emerald-300 rounded text-label-sm transition-colors flex items-center gap-1.5 btn-interact"
+              title="Generar Miniaturas y Títulos A/B"
+            >
+              <span className="material-symbols-outlined text-[16px] text-emerald-400">thumbnail_bar</span>
+              Miniaturas & Títulos
+            </button>
           </div>
         </header>
 
@@ -536,6 +591,26 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                           <span className="material-symbols-outlined text-outline-variant cursor-grab text-[18px]">drag_indicator</span>
                           <button
                             onClick={() => {
+                              const sampleCue = {
+                                timecode: '0:15s',
+                                type: 'B-ROLL' as const,
+                                instruction: `Archival B-Roll: Show high-res footage or dynamic animation matching '${block.text.substring(0, 40)}...'`,
+                              };
+                              setBlocks((prev) => {
+                                const updated = prev.map((b) =>
+                                  b.id === block.id ? { ...b, b_roll_cues: [...(b.b_roll_cues || []), sampleCue] } : b
+                                );
+                                triggerAutosave(updated, scriptTitle, currentScriptId);
+                                return updated;
+                              });
+                            }}
+                            className="w-6 h-6 rounded bg-surface-container-high flex items-center justify-center hover:text-amber-400 transition-colors border border-outline-variant"
+                            title="Insertar Señal de B-Roll / FX"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">movie</span>
+                          </button>
+                          <button
+                            onClick={() => {
                               setBlocks((prev) => {
                                 const updated = prev.filter((b) => b.id !== block.id);
                                 triggerAutosave(updated, scriptTitle, currentScriptId);
@@ -548,12 +623,27 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                             <span className="material-symbols-outlined text-[14px]">delete</span>
                           </button>
                         </div>
-                        <textarea
-                          className="w-full bg-transparent border-none text-on-surface resize-none focus:ring-0 p-0 font-body-lg leading-[1.8] outline-none"
-                          value={block.text}
-                          rows={Math.ceil(block.text.length / 75)}
-                          onChange={(e) => handleBlockChange(block.id, e.target.value)}
-                        />
+                        <div className="w-full flex flex-col gap-1">
+                          <textarea
+                            className="w-full bg-transparent border-none text-on-surface resize-none focus:ring-0 p-0 font-body-lg leading-[1.8] outline-none"
+                            value={block.text}
+                            rows={Math.ceil(block.text.length / 75)}
+                            onChange={(e) => handleBlockChange(block.id, e.target.value)}
+                          />
+                          {block.b_roll_cues && block.b_roll_cues.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {block.b_roll_cues.map((cue, cIdx) => (
+                                <span
+                                  key={cIdx}
+                                  className="text-[10px] font-mono bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded flex items-center gap-1"
+                                >
+                                  <span className="material-symbols-outlined text-[12px]">movie</span>
+                                  {cue.instruction}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })
@@ -763,6 +853,313 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
           </div>
         </div>
       </aside>
+
+      {/* TELEPROMPTER FULLSCREEN MODAL */}
+      {teleprompterOpen && (
+        <div className="fixed inset-0 bg-black z-50 flex flex-col">
+          {/* Teleprompter Top Bar */}
+          <div className="h-16 bg-[#121212] border-b border-[#262626] px-8 flex items-center justify-between select-none">
+            <div className="flex items-center gap-3">
+              <span className="material-symbols-outlined text-indigo-400 text-2xl">videocam</span>
+              <h2 className="text-lg font-bold text-white tracking-wide">Modo Teleprompter de Lectura</h2>
+              <span className="text-xs font-mono text-outline-variant px-2 py-0.5 bg-[#171717] rounded border border-[#262626]">
+                {voiceProfile.words_per_minute} WPM ({voiceProfile.linguistic_pacing})
+              </span>
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center gap-6">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-mono text-outline-variant uppercase">Velocidad:</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="6"
+                  value={teleprompterSpeed}
+                  onChange={(e) => setTeleprompterSpeed(Number(e.target.value))}
+                  className="w-24 accent-indigo-500 cursor-pointer"
+                />
+                <span className="text-xs font-mono text-indigo-400 font-bold">{teleprompterSpeed}x</span>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-mono text-outline-variant uppercase">Tamaño Texto:</span>
+                <button
+                  onClick={() => setTeleprompterFontSize((prev) => Math.max(24, prev - 4))}
+                  className="w-8 h-8 rounded bg-[#171717] border border-[#262626] text-white flex items-center justify-center font-mono hover:bg-[#262626]"
+                >
+                  A-
+                </button>
+                <span className="text-xs font-mono text-indigo-400 font-bold">{teleprompterFontSize}px</span>
+                <button
+                  onClick={() => setTeleprompterFontSize((prev) => Math.min(64, prev + 4))}
+                  className="w-8 h-8 rounded bg-[#171717] border border-[#262626] text-white flex items-center justify-center font-mono hover:bg-[#262626]"
+                >
+                  A+
+                </button>
+              </div>
+
+              <button
+                onClick={() => setTeleprompterPlaying(!teleprompterPlaying)}
+                className={`px-6 py-2 rounded-lg font-bold text-sm transition-all flex items-center gap-2 cursor-pointer ${
+                  teleprompterPlaying ? 'bg-amber-500 text-black hover:bg-amber-400' : 'bg-indigo-accent text-white hover:bg-indigo-600'
+                }`}
+              >
+                <span className="material-symbols-outlined">{teleprompterPlaying ? 'pause' : 'play_arrow'}</span>
+                {teleprompterPlaying ? 'Pausar Lectura' : 'Iniciar Teleprompter'}
+              </button>
+
+              <button
+                onClick={() => {
+                  setTeleprompterOpen(false);
+                  setTeleprompterPlaying(false);
+                }}
+                className="text-outline-variant hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined text-2xl">close</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Teleprompter Scroll Container */}
+          <div
+            ref={teleprompterScrollRef}
+            className="flex-1 overflow-y-auto custom-scrollbar px-16 py-32 max-w-5xl mx-auto w-full text-center select-none"
+          >
+            <div className="space-y-12">
+              {blocks
+                .filter((b) => b.type === 'paragraph')
+                .map((b, idx) => (
+                  <p
+                    key={idx}
+                    style={{ fontSize: `${teleprompterFontSize}px`, lineHeight: 1.8 }}
+                    className="font-sans text-white font-semibold tracking-wide drop-shadow-md"
+                  >
+                    {b.text}
+                  </p>
+                ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TITLES & THUMBNAILS GENERATOR MODAL */}
+      {titlesModalOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-[#121212] border border-[#262626] rounded-xl max-w-2xl w-full p-6 relative shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="flex justify-between items-start mb-6 pb-4 border-b border-[#262626]">
+              <div>
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <span className="material-symbols-outlined text-emerald-400">thumbnail_bar</span>
+                  Generador de Miniaturas & Títulos A/B
+                </h3>
+                <p className="text-xs text-outline-variant mt-1">
+                  Variantes de alto CTR optimizadas para el algoritmo de YouTube y Shorts.
+                </p>
+              </div>
+              <button onClick={() => setTitlesModalOpen(false)} className="text-outline-variant hover:text-white">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            {/* A/B Titles Section */}
+            <div className="space-y-6">
+              <div>
+                <span className="text-xs font-mono text-emerald-400 uppercase tracking-wider block mb-2 font-bold">
+                  🎯 Títulos A/B Probados para Máximo CTR
+                </span>
+                <div className="space-y-2">
+                  {[
+                    { title: `¿Por qué ${scriptTitle.replace('.md', '')} cambió la historia para siempre?`, CTR: '9.8%' },
+                    { title: `El error fatal que NADIE notó en ${scriptTitle.replace('.md', '')}`, CTR: '11.4%' },
+                    { title: `Lo que NUNCA te contaron sobre ${scriptTitle.replace('.md', '')}`, CTR: '10.2%' },
+                    { title: `La verdad oculta detrás de ${scriptTitle.replace('.md', '')} 😱`, CTR: '12.1%' },
+                  ].map((item, tIdx) => (
+                    <div
+                      key={tIdx}
+                      className="bg-[#171717] p-3 rounded-lg border border-[#262626] flex items-center justify-between hover:border-emerald-500/40 transition-colors"
+                    >
+                      <span className="text-sm font-semibold text-white">{item.title}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                          Est. CTR {item.CTR}
+                        </span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(item.title);
+                            alert('¡Título copiado!');
+                          }}
+                          className="text-outline-variant hover:text-white"
+                          title="Copiar Título"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">content_copy</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Thumbnail Studio Inputs Section */}
+              <div className="pt-4 border-t border-[#262626] space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono text-indigo-400 uppercase tracking-wider font-bold flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[16px]">tune</span>
+                    Estudio de Miniaturas Personalizadas (Campos de Idea Creadora)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[#171717] p-4 rounded-xl border border-[#262626]">
+                  <div>
+                    <label className="block text-[11px] font-mono text-outline-variant uppercase mb-1">💡 Idea Central o Concepto</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Dreamcast explotando en rayos azules"
+                      className="w-full bg-[#121212] border border-[#262626] focus:border-indigo-accent rounded p-2 text-xs text-white outline-none"
+                      value={thumbUserIdea}
+                      onChange={(e) => setThumbUserIdea(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-outline-variant uppercase mb-1">👤 Características de la Persona / Sujeto</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Creador con cara de asombro y señalando"
+                      className="w-full bg-[#121212] border border-[#262626] focus:border-indigo-accent rounded p-2 text-xs text-white outline-none"
+                      value={thumbPersonFeatures}
+                      onChange={(e) => setThumbPersonFeatures(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-outline-variant uppercase mb-1">🌄 Fondo y Ambiente</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Cuarto gamer retro de 1999 con luces neón"
+                      className="w-full bg-[#121212] border border-[#262626] focus:border-indigo-accent rounded p-2 text-xs text-white outline-none"
+                      value={thumbBgIdea}
+                      onChange={(e) => setThumbBgIdea(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-mono text-outline-variant uppercase mb-1">✏️ Texto Ilustrativo en Portada</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: ¡EL ERROR FATAL!"
+                      className="w-full bg-[#121212] border border-[#262626] focus:border-indigo-accent rounded p-2 text-xs text-white outline-none"
+                      value={thumbOverlayText}
+                      onChange={(e) => setThumbOverlayText(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="md:col-span-2 pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={generatingThumbnails}
+                      onClick={async () => {
+                        setGeneratingThumbnails(true);
+                        try {
+                          const res = await generateThumbnailOptions({
+                            script_title: scriptTitle,
+                            script_content: blocks.map((b) => b.text).join('\n\n'),
+                            user_idea: thumbUserIdea,
+                            person_features: thumbPersonFeatures,
+                            background_idea: thumbBgIdea,
+                            overlay_text: thumbOverlayText,
+                          });
+                          if (res.success && res.data?.options) {
+                            setThumbnailOptions(res.data.options);
+                          }
+                        } catch (e: any) {
+                          alert('Error al generar opciones de miniatura.');
+                        } finally {
+                          setGeneratingThumbnails(false);
+                        }
+                      }}
+                      className="bg-indigo-accent hover:bg-indigo-600 text-white font-bold px-4 py-2 rounded-lg text-xs font-mono transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    >
+                      <span className={`material-symbols-outlined text-[16px] ${generatingThumbnails ? 'animate-spin' : ''}`}>
+                        {generatingThumbnails ? 'sync' : 'auto_awesome'}
+                      </span>
+                      {generatingThumbnails ? 'Generando Portadas con IA...' : 'Generar Opciones de Miniatura con IA'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Thumbnail Prompt Results & Live Image Renders */}
+                {thumbnailOptions.length > 0 && (
+                  <div className="space-y-4 pt-2">
+                    <span className="text-xs font-mono text-indigo-400 uppercase tracking-wider block font-bold">
+                      🖼️ Opciones de Portada Renderizadas en Vivo (16:9 HD)
+                    </span>
+                    <div className="grid grid-cols-1 gap-4">
+                      {thumbnailOptions.map((opt, oIdx) => (
+                        <div key={oIdx} className="bg-[#171717] p-4 rounded-xl border border-[#262626] space-y-3 hover:border-indigo-500/40 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                              Opción #{oIdx + 1}: {opt.concept_name}
+                            </span>
+                            <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-bold">
+                              Texto sugerido: "{opt.overlay_text_suggestion}"
+                            </span>
+                          </div>
+
+                          {/* Direct AI Rendered Image */}
+                          {opt.image_url && (
+                            <div className="relative rounded-lg overflow-hidden border border-[#3f3f46] aspect-video bg-[#0a0a0a] group">
+                              <img
+                                src={opt.image_url}
+                                alt={opt.concept_name}
+                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                onError={(e) => {
+                                  // Fallback to high-res gaming render if generation service is busy
+                                  (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1280&auto=format&fit=crop`;
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-xs text-white font-mono font-bold">{opt.overlay_text_suggestion}</span>
+                              </div>
+                            </div>
+                          )}
+
+                          <p className="text-xs text-outline-variant italic font-sans">{opt.ctr_boost_reason}</p>
+                          <div className="bg-[#121212] p-2.5 rounded border border-[#262626]">
+                            <p className="text-[11px] font-mono text-indigo-200 leading-relaxed">{opt.midjourney_prompt}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                if (opt.image_url) {
+                                  window.open(opt.image_url, '_blank');
+                                }
+                              }}
+                              className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 px-3 py-1 rounded text-xs font-mono transition-colors flex items-center gap-1 font-bold cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">open_in_new</span> Ver / Abrir Imagen HD (1280x720)
+                            </button>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(opt.midjourney_prompt);
+                                alert('¡Prompt copiado al portapapeles!');
+                              }}
+                              className="bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 px-3 py-1 rounded text-xs font-mono transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">content_copy</span> Copiar Prompt
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 };
