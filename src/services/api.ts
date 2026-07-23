@@ -64,20 +64,37 @@ export async function fetchVoiceProfile(): Promise<VoiceDNASignatures> {
 }
 
 /**
- * Saves the user's Gemini API key into their own row in the DB.
+ * Saves one or more API keys into the user's DB row.
  * POST /api/v1/auth/settings/keys
- * SECURITY: the key travels one-way from browser → DB, never back.
+ * SECURITY: keys travel one-way from browser → DB, never back.
  */
-export async function saveUserGeminiKey(gemini_api_key: string): Promise<{ success: boolean; message: string }> {
-  const response = await apiClient.post('/auth/settings/keys', { gemini_api_key });
+export async function saveUserKeys(keys: {
+  gemini_api_key?: string;
+  anthropic_api_key?: string;
+  openai_api_key?: string;
+  grok_api_key?: string;
+}): Promise<{ success: boolean; message: string }> {
+  const response = await apiClient.post('/auth/settings/keys', keys);
   return response.data;
 }
 
+/** Convenience alias: save only the Gemini key. */
+export async function saveUserGeminiKey(gemini_api_key: string): Promise<{ success: boolean; message: string }> {
+  return saveUserKeys({ gemini_api_key });
+}
+
+export type ProviderStatus = 'CONNECTED' | 'MISSING';
+
 /**
- * Returns only the masked presence status of the user's stored keys ("CONNECTED" | "MISSING").
+ * Returns masked presence status of all stored keys — never the raw values.
  * GET /api/v1/auth/settings/keys
  */
-export async function fetchUserKeyStatus(): Promise<{ gemini: 'CONNECTED' | 'MISSING' }> {
+export async function fetchUserKeyStatus(): Promise<{
+  gemini: ProviderStatus;
+  anthropic: ProviderStatus;
+  openai: ProviderStatus;
+  grok: ProviderStatus;
+}> {
   const response = await apiClient.get('/auth/settings/keys');
   return response.data;
 }
@@ -88,6 +105,15 @@ export async function fetchUserKeyStatus(): Promise<{ gemini: 'CONNECTED' | 'MIS
  */
 export async function fetchTrainingSources(): Promise<TrainingSource[]> {
   const response = await apiClient.get('/training/sources');
+  return response.data;
+}
+
+/**
+ * Deletes a training source from the database.
+ * DELETE /api/v1/training/sources/:id
+ */
+export async function deleteTrainingSource(id: string): Promise<{ success: boolean; message: string }> {
+  const response = await apiClient.delete(`/training/sources/${id}`);
   return response.data;
 }
 
@@ -136,6 +162,83 @@ export async function refineScript(params: {
   };
 }): Promise<{ success: boolean; blocks: unknown[] }> {
   const response = await apiClient.post('/scripts/refine', params);
+  return response.data;
+}
+
+/**
+ * Extracts a new high-retention viral clip candidate from the current script content.
+ * POST /api/v1/scripts/extract-clips
+ */
+export async function extractClips(params: {
+  script_text: string;
+  ai_voice_profile?: {
+    linguistic_pacing: string;
+    words_per_minute: number;
+    catchphrases: string[];
+  };
+}): Promise<{
+  success: boolean;
+  clip: {
+    text: string;
+    timecode: string;
+    label: string;
+    retention: 'High' | 'Med';
+    clip_metadata?: {
+      short_title: string;
+      duration_shorts: string;
+      suggested_hook: string;
+    };
+    trend_analytics?: {
+      virality_score: number;
+      platform_trends: Array<{ platform: string; status: string; volume_score: number }>;
+      rated_hashtags: Array<{ hashtag: string; score: number; reach_estimate: string }>;
+    };
+  };
+}> {
+  const response = await apiClient.post('/scripts/extract-clips', params);
+  return response.data;
+}
+
+/**
+ * Ingests real published video performance metrics (long-form or clip)
+ * POST /api/v1/analytics/link-performance
+ */
+export async function linkPerformanceMetrics(params: {
+  published_url: string;
+  content_type: 'clip' | 'long_form';
+  title: string;
+  ai_predicted_score?: number;
+  views_count?: number;
+  likes_count?: number;
+  comments_count?: number;
+  watch_time_mins?: number;
+}): Promise<any> {
+  const response = await apiClient.post('/analytics/link-performance', params);
+  return response.data;
+}
+
+/**
+ * Retrieves performance metrics history for closed-loop ML analytics
+ * GET /api/v1/analytics/performance-log
+ */
+export async function fetchPerformanceLog(): Promise<{
+  success: boolean;
+  metrics: Array<{
+    id: number;
+    content_type: string;
+    title: string;
+    published_url: string;
+    platform: string;
+    views_count: number;
+    likes_count: number;
+    comments_count: number;
+    watch_time_mins: number;
+    ai_predicted_score: number;
+    actual_virality_score: number;
+    created_at: string;
+  }>;
+}> {
+  const response = await apiClient.get('/analytics/performance-log');
   return response.data;
 }
 
@@ -197,75 +300,13 @@ export interface VoiceAnalysis {
 }
 
 /**
- * Extracts the YouTube video ID from a URL.
- */
-function extractYouTubeVideoId(url: string): string | null {
-  const patterns = [
-    /(?:v=|youtu\.be\/|embed\/|shorts\/)([a-zA-Z0-9_-]{11})/,
-  ];
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) return match[1];
-  }
-  return null;
-}
-
-/**
- * Fetches a YouTube transcript from the browser using the youtube-transcript proxy API.
- * This runs in the USER's browser so Railway's IP block doesn't apply.
- */
-async function fetchYouTubeTranscriptFromBrowser(videoId: string): Promise<{ text: string; duration_mins: number }> {
-  // Use the public youtube-transcript API service
-  const res = await fetch(`https://api.kome.ai/api/tools/youtube-transcripts?video_id=${videoId}&format=true`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ video_id: videoId, format: true }),
-  });
-  if (!res.ok) {
-    // Fallback: try the timedtext endpoint directly
-    const langRes = await fetch(
-      `https://www.youtube.com/api/timedtext?v=${videoId}&lang=en&fmt=json3`
-    );
-    if (langRes.ok) {
-      const data = await langRes.json();
-      const events = data?.events || [];
-      const text = events
-        .filter((e: any) => e.segs)
-        .flatMap((e: any) => e.segs.map((s: any) => s.utf8))
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const lastEvent = events[events.length - 1];
-      const duration_mins = lastEvent ? (lastEvent.tStartMs + (lastEvent.dDurationMs || 0)) / 60000 : 5;
-      return { text, duration_mins };
-    }
-    throw new Error('No se pudieron cargar los subtítulos. Verifica que el video tenga subtítulos habilitados.');
-  }
-  const data = await res.json();
-  const text = (data?.transcript || '').replace(/\s+/g, ' ').trim();
-  return { text, duration_mins: 5 };
-}
-
-/**
- * Ingests a YouTube URL: fetches the transcript from the browser (no Railway IP block)
- * then sends the text to the backend for AI voice analysis.
- * POST /api/v1/training/ingest-with-transcript
+ * Ingests a YouTube URL by sending it directly to the backend.
+ * The backend uses youtube-transcript-api (Python) to extract subtitles server-side,
+ * which works reliably from localhost without CORS or IP-block issues.
+ * POST /api/v1/training/ingest-youtube
  */
 export async function ingestYouTubeUrl(url: string): Promise<{ success: boolean; source: TrainingSource; analysis?: VoiceAnalysis }> {
-  const videoId = extractYouTubeVideoId(url);
-  if (!videoId) throw new Error('URL de YouTube inválida.');
-
-  // Step 1: fetch transcript in the browser (bypasses IP blocks)
-  const { text, duration_mins } = await fetchYouTubeTranscriptFromBrowser(videoId);
-  if (!text || text.length < 50) throw new Error('El transcript está vacío o es demasiado corto para analizar.');
-
-  // Step 2: send to backend for storage + AI analysis
-  const response = await apiClient.post('/training/ingest-with-transcript', {
-    video_id: videoId,
-    url,
-    transcript_text: text,
-    duration_mins,
-  });
+  const response = await apiClient.post('/training/ingest-youtube', { url });
   return response.data;
 }
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { saveUserGeminiKey, fetchUserKeyStatus } from '../services/api';
+import { saveUserKeys, fetchUserKeyStatus } from '../services/api';
+import type { ProviderStatus } from '../services/api';
 
 interface SettingsViewProps {
   isAuthenticated: boolean;
@@ -7,7 +8,12 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) => {
   // DB-sourced key status — never the raw key value
-  const [geminiStatus, setGeminiStatus] = useState<'CONNECTED' | 'MISSING' | 'LOADING'>('LOADING');
+  const [keyStatuses, setKeyStatuses] = useState<Record<string, ProviderStatus | 'LOADING'>>({
+    gemini: 'LOADING',
+    anthropic: 'LOADING',
+    openai: 'LOADING',
+    grok: 'LOADING',
+  });
   const [inputs, setInputs] = useState<Record<string, string>>({
     gemini: '',
     anthropic: '',
@@ -30,12 +36,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
   // On mount or auth change, fetch real key status from DB
   useEffect(() => {
     if (!isAuthenticated) {
-      setGeminiStatus('MISSING');
+      setKeyStatuses({ gemini: 'MISSING', anthropic: 'MISSING', openai: 'MISSING', grok: 'MISSING' });
       return;
     }
     fetchUserKeyStatus()
-      .then((status) => setGeminiStatus(status.gemini))
-      .catch(() => setGeminiStatus('MISSING'));
+      .then((status) => setKeyStatuses(status))
+      .catch(() => setKeyStatuses({ gemini: 'MISSING', anthropic: 'MISSING', openai: 'MISSING', grok: 'MISSING' }));
   }, [isAuthenticated]);
 
   const providers = [
@@ -53,7 +59,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
       icon: 'terminal',
       connectedModel: 'Claude 3.5 Sonnet',
       maskPrefix: 'sk-ant-••••••••••••',
-      dbBacked: false,
+      dbBacked: true,
     },
     {
       id: 'grok',
@@ -61,7 +67,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
       icon: 'bolt',
       connectedModel: 'Grok 2',
       maskPrefix: 'sk-grok-••••••••••••',
-      dbBacked: false,
+      dbBacked: true,
     },
     {
       id: 'openai',
@@ -69,7 +75,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
       icon: 'token',
       connectedModel: 'GPT-4o',
       maskPrefix: 'sk-proj-••••••••••••',
-      dbBacked: false,
+      dbBacked: true,
     },
   ];
 
@@ -81,38 +87,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
     const key = inputs[provider].trim();
     if (!key) return;
 
-    if (provider === 'gemini') {
-      setSaving('gemini');
-      setSaveMsg(null);
-      try {
-        await saveUserGeminiKey(key);
-        setGeminiStatus('CONNECTED');
-        setSaveMsg('✓ Gemini key saved securely to your profile.');
-        setInputs(prev => ({ ...prev, gemini: '' }));
-      } catch (err: any) {
-        setSaveMsg(`✗ ${err?.response?.data?.detail || 'Failed to save key.'}`);
-      } finally {
-        setSaving(null);
-      }
-    } else {
-      // Non-Gemini keys: local only (not used for generation yet)
+    setSaving(provider);
+    setSaveMsg(null);
+    try {
+      const keyPayload: Record<string, string> = {};
+      keyPayload[`${provider}_api_key`] = key;
+      await saveUserKeys(keyPayload);
+      setKeyStatuses(prev => ({ ...prev, [provider]: 'CONNECTED' }));
+      setSaveMsg(`✓ ${providers.find(p => p.id === provider)?.name || provider} key saved securely to your profile.`);
       setInputs(prev => ({ ...prev, [provider]: '' }));
-      setSaveMsg(`✓ ${provider} key saved locally (not yet used for generation).`);
+    } catch (err: any) {
+      setSaveMsg(`✗ ${err?.response?.data?.detail || 'Failed to save key.'}`);
+    } finally {
+      setSaving(null);
     }
   };
 
   const handleReplace = async (provider: string) => {
-    if (provider === 'gemini') {
-      setSaving('gemini');
-      try {
-        await saveUserGeminiKey('');
-        setGeminiStatus('MISSING');
-        setSaveMsg('Gemini key removed from your profile.');
-      } catch {
-        setSaveMsg('Failed to remove key.');
-      } finally {
-        setSaving(null);
-      }
+    setSaving(provider);
+    setSaveMsg(null);
+    try {
+      const keyPayload: Record<string, string> = {};
+      keyPayload[`${provider}_api_key`] = '';
+      await saveUserKeys(keyPayload);
+      setKeyStatuses(prev => ({ ...prev, [provider]: 'MISSING' }));
+      setSaveMsg(`${providers.find(p => p.id === provider)?.name || provider} key removed from your profile.`);
+    } catch {
+      setSaveMsg('Failed to remove key.');
+    } finally {
+      setSaving(null);
     }
   };
 
@@ -183,11 +186,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
 
           <div className="space-y-3">
             {providers.map((p) => {
-              // For Gemini, use real DB status; others fall back to local input presence
-              const isConnected = p.id === 'gemini'
-                ? geminiStatus === 'CONNECTED'
-                : !!inputs[p.id]; // placeholder: not DB-backed yet
-              const isLoading = p.id === 'gemini' && geminiStatus === 'LOADING';
+              const isConnected = keyStatuses[p.id] === 'CONNECTED';
+              const isLoading = keyStatuses[p.id] === 'LOADING';
 
               return (
                 <div
@@ -272,7 +272,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAuthenticated }) =
           <div className="mt-6 p-4 bg-primary/5 border-l-2 border-primary flex gap-4">
             <span className="material-symbols-outlined text-primary">verified_user</span>
             <p className="text-xs text-primary/80 leading-relaxed font-body-md">
-              Your API keys are encrypted locally on this device. ScriptDNA uses your keys to run research and script generation directly through provider endpoints without adding token markups or intermediate logging.
+              Your API keys are saved securely in the database, never exposed back to the browser. ScriptDNA uses your keys to run research and script generation directly through provider endpoints without intermediate logging.
             </p>
           </div>
         </div>

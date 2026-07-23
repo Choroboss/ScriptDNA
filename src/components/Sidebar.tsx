@@ -31,6 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: t('nav.dashboard'), icon: 'dashboard' },
     { id: 'my-scripts', label: t('nav.myScripts'), icon: 'description' },
     { id: 'style-ai-training', label: t('nav.styleTraining'), icon: 'model_training' },
+    { id: 'real-metrics', label: 'Rendimiento Real ML', icon: 'analytics' },
     { id: 'settings', label: t('nav.settings'), icon: 'settings' },
   ];
 
@@ -104,10 +105,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bottom Nav / Footer */}
       <div className="mt-auto space-y-1 pt-4 border-t border-outline-variant">
-        <a className="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high transition-colors rounded-lg group" href="#retention">
+        <button 
+          onClick={() => setActiveView('retention-rules')} 
+          className={`w-full flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high transition-colors rounded-lg group ${
+            activeView === 'retention-rules' ? 'bg-surface-container-high text-primary font-bold' : ''
+          }`}
+        >
           <span className="material-symbols-outlined group-hover:text-primary transition-colors">analytics</span>
           <span className="font-body-md text-body-md">{t('nav.retentionRules')}</span>
-        </a>
+        </button>
         <a className="flex items-center gap-3 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high transition-colors rounded-lg group" href="#help">
           <span className="material-symbols-outlined group-hover:text-primary transition-colors">help</span>
           <span className="font-body-md text-body-md">{t('nav.help')}</span>

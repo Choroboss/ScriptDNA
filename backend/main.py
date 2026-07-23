@@ -11,8 +11,6 @@ import hashlib
 
 import os
 
-import os
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATABASE = os.path.join(BASE_DIR, "users.db")
 
@@ -38,6 +36,10 @@ class HybridCursor:
             return getattr(self.cursor, 'lastrowid', None)
         return self.cursor.lastrowid
 
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
 class HybridConnection:
     def __init__(self, conn, is_postgres):
         self.conn = conn
@@ -59,7 +61,7 @@ def get_db_connection():
         conn = psycopg2.connect(db_url)
         return HybridConnection(conn, True)
     else:
-        conn = sqlite3.connect(DATABASE)
+        conn = sqlite3.connect(DATABASE, timeout=10, check_same_thread=False)
         return HybridConnection(conn, False)
 
 def init_db():
@@ -75,7 +77,10 @@ def init_db():
             password TEXT NOT NULL,
             tier TEXT DEFAULT 'PRO WRITER',
             avatar_url TEXT,
-            gemini_api_key TEXT
+            gemini_api_key TEXT,
+            anthropic_api_key TEXT,
+            openai_api_key TEXT,
+            grok_api_key TEXT
         )
     """)
     cursor.execute(f"""
@@ -113,12 +118,31 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
-    # Migrate: add gemini_api_key if not present (idempotent, only needed for SQLite)
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS published_performance_metrics (
+            id {pk},
+            user_id INTEGER NOT NULL,
+            content_type TEXT NOT NULL,
+            title TEXT NOT NULL,
+            published_url TEXT NOT NULL,
+            platform TEXT DEFAULT 'YouTube',
+            views_count INTEGER DEFAULT 0,
+            likes_count INTEGER DEFAULT 0,
+            comments_count INTEGER DEFAULT 0,
+            watch_time_mins REAL DEFAULT 0.0,
+            ai_predicted_score INTEGER DEFAULT 75,
+            actual_virality_score INTEGER DEFAULT 75,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+    # Migrate: add API key columns if not present (idempotent, only needed for SQLite)
     if not is_pg:
-        try:
-            cursor.execute("ALTER TABLE users ADD COLUMN gemini_api_key TEXT")
-        except Exception:
-            pass  # Column already exists
+        for col in ["gemini_api_key", "anthropic_api_key", "openai_api_key", "grok_api_key"]:
+            try:
+                cursor.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+            except Exception:
+                pass  # Column already exists
     conn.commit()
     conn.close()
 
@@ -179,6 +203,10 @@ class ScriptRefineRequest(BaseModel):
     refinement_instruction: str
     ai_voice_profile: VoiceProfileSchema = None
 
+class ScriptExtractClipRequest(BaseModel):
+    script_text: str
+    ai_voice_profile: VoiceProfileSchema = None
+
 class RegisterRequest(BaseModel):
     name: str
     email: str
@@ -190,6 +218,9 @@ class LoginRequest(BaseModel):
 
 class SaveUserKeysRequest(BaseModel):
     gemini_api_key: str = None
+    anthropic_api_key: str = None
+    openai_api_key: str = None
+    grok_api_key: str = None
 
 # --- Helpers ---
 
@@ -247,6 +278,95 @@ def get_user_gemini_key(email: str, client_header_key: str = None) -> tuple[str,
         return client_header_key, "Your API Key is processed strictly in-memory to execute the request and is never persisted on our servers."
         
     return None, None
+
+# Map provider IDs to their DB column and env-var fallback for the owner
+_PROVIDER_KEY_MAP = {
+    "gemini":    {"column": "gemini_api_key",    "env": "GEMINI_API_KEY"},
+    "anthropic": {"column": "anthropic_api_key", "env": "ANTHROPIC_API_KEY"},
+    "openai":    {"column": "openai_api_key",    "env": "OPENAI_API_KEY"},
+    "grok":      {"column": "grok_api_key",      "env": "GROK_API_KEY"},
+}
+
+def get_user_api_key(email: str, provider: str = "gemini") -> tuple[str, str]:
+    """
+    Generic dual-mode API key lookup for any provider.
+    Returns (api_key, notice).
+    """
+    if not email or provider not in _PROVIDER_KEY_MAP:
+        return None, None
+
+    meta = _PROVIDER_KEY_MAP[provider]
+    owner_email = os.getenv("OWNER_EMAIL", "vicente@example.com")
+
+    if email.strip().lower() == owner_email.strip().lower():
+        return os.getenv(meta["env"]), "Owner Mode: Using secure backend server key."
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT {meta['column']} FROM users WHERE email = ?", (email.strip().lower(),))
+    row = cursor.fetchone()
+    conn.close()
+
+    db_key = row[0] if row and row[0] else None
+    return (db_key, None) if db_key else (None, None)
+
+
+def build_adaptive_creator_prompt_context(user_email: str) -> str:
+    """
+    GOLDEN RULE: Continuous Learning Prompt Context Generator.
+    Aggregates training source transcripts and real market performance metrics for the given user,
+    ensuring future scripts emulate top-performing real market videos and voice DNA.
+    """
+    if not user_email:
+        return ""
+        
+    user_id = get_user_id_by_email(user_email)
+    if not user_id:
+        return ""
+        
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT source_name, content_text FROM training_sources WHERE user_id = ? ORDER BY id DESC LIMIT 5",
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+
+        # Query top-performing published videos in market
+        cursor.execute(
+            "SELECT title, platform, views_count, actual_virality_score FROM published_performance_metrics WHERE user_id = ? AND actual_virality_score >= 70 ORDER BY actual_virality_score DESC LIMIT 3",
+            (user_id,)
+        )
+        top_perf_rows = cursor.fetchall()
+        conn.close()
+        
+        if not rows and not top_perf_rows:
+            return ""
+            
+        excerpts = []
+        for r in rows:
+            name, text = r[0], r[1]
+            snippet = text[:350].replace("\n", " ").strip()
+            excerpts.append(f"- From '{name}': \"{snippet}...\"")
+            
+        excerpts_str = "\n".join(excerpts) if excerpts else "Standard creator training baseline."
+
+        perf_str = ""
+        if top_perf_rows:
+            perf_items = [f"- '{r[0]}' on {r[1]} (Score: {r[3]}%, Views: {r[2]:,})" for r in top_perf_rows]
+            perf_str = "\nTop Real Market Performing Videos (Prioritize these hook structures):\n" + "\n".join(perf_items)
+
+        return f"""
+=== GOLDEN RULE: CREATOR CONTINUOUS LEARNING CONTEXT ===
+The system has learned from the creator's past video scripts and real market performance.
+You MUST strictly emulate the sentence structures, tone, and rhythm found in these actual training excerpts:
+{excerpts_str}{perf_str}
+========================================================
+"""
+    except Exception as e:
+        print(f"Failed to build adaptive prompt context: {e}")
+        return ""
 
 def fetch_youtube_video_title(video_id: str) -> str:
     url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
@@ -341,48 +461,77 @@ async def login(payload: LoginRequest):
 
 @app.post("/api/v1/auth/settings/keys")
 async def save_user_keys(payload: SaveUserKeysRequest, request: Request):
-    """Persist the user's Gemini API key into their own DB row. Only the key owner can write it."""
+    """Persist one or more API keys into the user's own DB row."""
     user_email = request.headers.get("X-User-Email", "").strip().lower()
     if not user_email:
         raise HTTPException(status_code=401, detail="Authentication required.")
     owner_email = os.getenv("OWNER_EMAIL", "vicente@example.com").strip().lower()
     if user_email == owner_email:
-        # Owner uses server env key — no DB write needed
-        return {"success": True, "message": "Owner Mode: key is managed via server environment."}
+        return {"success": True, "message": "Owner Mode: keys are managed via server environment."}
+
+    # Build a dynamic UPDATE with only the fields that were sent
+    key_fields = {
+        "gemini_api_key": payload.gemini_api_key,
+        "anthropic_api_key": payload.anthropic_api_key,
+        "openai_api_key": payload.openai_api_key,
+        "grok_api_key": payload.grok_api_key,
+    }
+    # Filter to only non-None values (explicit empty string "" means "remove this key")
+    updates = {}
+    for col, val in key_fields.items():
+        if val is not None:
+            updates[col] = val.strip() if val else None
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No API key provided.")
+
+    set_clause = ", ".join(f"{col} = ?" for col in updates)
+    values = list(updates.values()) + [user_email]
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE users SET gemini_api_key = ? WHERE email = ?",
-        (payload.gemini_api_key.strip() if payload.gemini_api_key else None, user_email)
-    )
+    cursor.execute(f"UPDATE users SET {set_clause} WHERE email = ?", tuple(values))
     if cursor.rowcount == 0:
         conn.close()
         raise HTTPException(status_code=404, detail="User not found.")
     conn.commit()
     conn.close()
-    return {"success": True, "message": "API key saved securely to your profile."}
+    return {"success": True, "message": "API key(s) saved securely to your profile."}
 
 @app.get("/api/v1/auth/settings/keys")
 async def get_user_key_status(request: Request):
-    """Return key presence status only — never expose the raw key to the browser."""
+    """Return key presence status for all providers — never expose raw keys."""
     user_email = request.headers.get("X-User-Email", "").strip().lower()
     if not user_email:
         raise HTTPException(status_code=401, detail="Authentication required.")
 
     owner_email = os.getenv("OWNER_EMAIL", "vicente@example.com").strip().lower()
     if user_email == owner_email:
-        # Owner always has a key via server environment — report CONNECTED
-        has_key = bool(os.getenv("GEMINI_API_KEY"))
-        return {"gemini": "CONNECTED" if has_key else "MISSING"}
+        return {
+            "gemini": "CONNECTED" if os.getenv("GEMINI_API_KEY") else "MISSING",
+            "anthropic": "CONNECTED" if os.getenv("ANTHROPIC_API_KEY") else "MISSING",
+            "openai": "CONNECTED" if os.getenv("OPENAI_API_KEY") else "MISSING",
+            "grok": "CONNECTED" if os.getenv("GROK_API_KEY") else "MISSING",
+        }
 
-    # For all other users: check their OWN DB row — never leak owner key
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT gemini_api_key FROM users WHERE email = ?", (user_email,))
+    cursor.execute(
+        "SELECT gemini_api_key, anthropic_api_key, openai_api_key, grok_api_key FROM users WHERE email = ?",
+        (user_email,)
+    )
     row = cursor.fetchone()
     conn.close()
-    has_key = bool(row and row[0])
-    return {"gemini": "CONNECTED" if has_key else "MISSING"}
+
+    if not row:
+        return {"gemini": "MISSING", "anthropic": "MISSING", "openai": "MISSING", "grok": "MISSING"}
+
+    return {
+        "gemini": "CONNECTED" if row[0] else "MISSING",
+        "anthropic": "CONNECTED" if row[1] else "MISSING",
+        "openai": "CONNECTED" if row[2] else "MISSING",
+        "grok": "CONNECTED" if row[3] else "MISSING",
+    }
 
 @app.post("/api/v1/training/ingest-youtube")
 async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
@@ -395,7 +544,10 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
     
     title = fetch_youtube_video_title(video_id)
     
-    gemini_key = request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
+    gemini_key, _ = get_user_gemini_key(
+        request.headers.get("X-User-Email", "").strip().lower(),
+        request.headers.get("X-Gemini-API-Key") or request.headers.get("X-Gemini-Key")
+    )
     
     try:
         try:
@@ -481,7 +633,7 @@ async def ingest_youtube(payload: YouTubeIngestRequest, request: Request):
                     }
                 }
 
-                models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+                models_to_try = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro-latest"]
                 for model_name in models_to_try:
                     gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
                     headers = {
@@ -859,12 +1011,15 @@ async def generate_script(payload: ScriptGenerateRequest, request: Request):
     target_dur = payload.target_duration_mins or 5
     target_words = int(target_dur * wpm)
     
+    adaptive_context = build_adaptive_creator_prompt_context(user_email)
+    
     system_instruction = f"""You are an elite scriptwriter. You must write a YouTube script based on the user's prompt. 
 CRITICAL STYLE RULES TO IMITATE THE CREATOR:
 - Your tone and pacing must be strictly: {pacing_desc} (~{wpm} WPM).
 - You MUST naturally sprinkle the following exact catchphrases throughout the text as transition elements or fillers: {catchphrases_str}.
 - Structure: Ensure you include an intense hook in the first 15 seconds, and respect a peak retention pacing interval of {peak_mins} minutes.
-- Constraint: The total word count of all generated blocks combined MUST be strictly around {target_words} words to guarantee an exact presentation time of {target_dur} minutes based on the creator's actual speech velocity."""
+- Constraint: The total word count of all generated blocks combined MUST be strictly around {target_words} words to guarantee an exact presentation time of {target_dur} minutes based on the creator's actual speech velocity.
+{adaptive_context}"""
     
     prompt_text = f"""
     Write a YouTube script about: {payload.prompt}. 
@@ -911,7 +1066,7 @@ CRITICAL STYLE RULES TO IMITATE THE CREATOR:
         }
     }
     
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro"]
+    models_to_try = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro-latest"]
     last_err = None
     
     for model_name in models_to_try:
@@ -1107,7 +1262,7 @@ async def get_training_sources(request: Request):
             formatted_date = "07/08/2026"
             
         sources_list.append({
-            "id": f"db-{source_id}",
+            "id": str(source_id),
             "name": name,
             "type": stype,
             "status": "Indexed",
@@ -1115,6 +1270,21 @@ async def get_training_sources(request: Request):
             "timestamp": formatted_date
         })
     return sources_list
+
+@app.delete("/api/v1/training/sources/{source_id}")
+async def delete_training_source(source_id: str, request: Request):
+    user_email = request.headers.get("X-User-Email")
+    user_id = get_user_id_by_email(user_email)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    
+    clean_id = source_id.replace("src-", "").replace("yt-", "")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM training_sources WHERE id = ? AND user_id = ?", (clean_id, user_id))
+    conn.commit()
+    conn.close()
+    return {"success": True, "message": "Source deleted."}
 
 # --- Script Document Endpoints ---
 
@@ -1191,13 +1361,15 @@ async def refine_script(payload: ScriptRefineRequest, request: Request):
         wpm = payload.ai_voice_profile.words_per_minute
         catchphrases = payload.ai_voice_profile.catchphrases
     catchphrases_str = ", ".join(catchphrases)
+    adaptive_context = build_adaptive_creator_prompt_context(user_email)
 
     system_instruction = f"""You are an elite script editor. Your task is to refine an existing YouTube script.
 STRICT STYLE RULES (do NOT break these):
 - Maintain the creator's voice: {pacing_desc} (~{wpm} WPM).
 - Naturally weave these catchphrases throughout: {catchphrases_str}.
 - Return ONLY the updated blocks JSON array. Do not add explanation text.
-- Keep the same number of blocks and block types unless the instruction explicitly asks to merge or split."""
+- Keep the same number of blocks and block types unless the instruction explicitly asks to merge or split.
+{adaptive_context}"""
 
     prompt_text = f"""Refinement instruction: "{payload.refinement_instruction}"
 
@@ -1235,7 +1407,7 @@ Apply the instruction and return only the updated blocks JSON array, preserving 
         }
     }
 
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    models_to_try = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro-latest"]
     last_err = None
     for model_name in models_to_try:
         gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
@@ -1257,3 +1429,278 @@ Apply the instruction and return only the updated blocks JSON array, preserving 
             print(f"Model {model_name} exception: {e}")
 
     raise HTTPException(status_code=500, detail=f"AI refinement failed: {last_err}")
+
+@app.post("/api/v1/scripts/extract-clips")
+async def extract_clip(payload: ScriptExtractClipRequest, request: Request):
+    """
+    Analyzes the active script text using Gemini + Golden Rule learning context
+    to extract a brand-new high-retention viral clip block.
+    """
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    gemini_key, _ = get_user_gemini_key(user_email)
+    if not gemini_key:
+        raise HTTPException(status_code=400, detail="Missing Gemini API Key. Please configure your key in Settings.")
+
+    if not payload.script_text or len(payload.script_text.strip()) < 30:
+        raise HTTPException(status_code=400, detail="Script content is too short to extract a clip candidate.")
+
+    pacing_desc = "Punchy & Fast-Paced"
+    wpm = 170
+    catchphrases = ["Socio", "Uff", "Brutal", "Literal"]
+    if payload.ai_voice_profile:
+        pacing_desc = payload.ai_voice_profile.linguistic_pacing
+        wpm = payload.ai_voice_profile.words_per_minute
+        catchphrases = payload.ai_voice_profile.catchphrases
+
+    adaptive_context = build_adaptive_creator_prompt_context(user_email)
+
+    system_instruction = f"""You are a strict, highly critical short-form viral editor, social media trend analyst, and algorithm auditor.
+Your task is to analyze the user's provided YouTube script and extract ONE distinct standalone clip candidate suitable for TikTok, Instagram Reels, YouTube Shorts, X (Twitter), and Facebook.
+
+CRITICAL VIRALITY SCORING RUBRIC (REALISTIC & UNBIASED):
+- DO NOT default to inflated scores above 90% unless the clip possesses an extraordinary viral combination (Intense Hook + High Conflict + Strong Emotion + Curiosity Gap).
+- Evaluate virality_score (1-100) strictly based on 4 factors:
+  1. Hook Strength (0-25 pts): Does the opening sentence force immediate retention in 3s?
+  2. Conflict / Debate Potential (0-25 pts): Will viewers comment or disagree in the comments?
+  3. Emotional Peak (0-25 pts): Does it evoke nostalgia, shock, humor, or awe?
+  4. Curiosity Gap (0-25 pts): Does it leave the viewer wanting to watch until the very last second?
+- Most average or informational clips MUST receive realistic scores in the 45% - 75% range.
+- Assign retention rating realistically: 'High' (75%+), 'Med' (50-74%), or 'Low' (under 50%).
+
+CRITICAL ALGORITHM HASHTAG RULES:
+- DO NOT generate generic broad hashtags like #Viral, #Shorts, or #Video.
+- You MUST extract hyper-targeted NICHE HASHTAGS directly derived from the specific entities, video games, personalities, brands, or topics explicitly discussed in the clip.
+- Categorize hashtags to train recommendation algorithms so the video is served directly to the EXACT targeted audience.
+- Rate each hashtag (1-100) based on niche audience match and search relevance.
+
+STRICT CREATOR VOICE RULES:
+- Pacing: {pacing_desc} (~{wpm} WPM).
+- Catchphrases to emphasize: {", ".join(catchphrases)}.
+{adaptive_context}"""
+
+    prompt_text = f"""Analyze this script and select a 30-60 second segment to extract as a clip candidate.
+
+CRITICAL INSTRUCTION FOR VIRALITY SCORING:
+Be extremely critical and realistic when evaluating virality_score. Calculate the score using the 4-factor rubric (Hook, Conflict, Emotion, Curiosity Gap). Do NOT give inflated >90% scores to ordinary passages. Informational passages without strong conflict or emotion should be scored realistically (40-70%).
+
+--- SCRIPT CONTENT ---
+{payload.script_text[:4000]}
+--- END SCRIPT CONTENT ---
+
+Return a JSON object matching the requested schema with:
+- text: The extracted verbatim or polished passage from the script (prefixed with timecode timestamp like '[1:30]').
+- timecode: Estimated start time (e.g., '1:30s').
+- label: Title of the viral candidate (e.g., 'Viral Clip Candidate').
+- retention: Retention rating ('High', 'Med', or 'Low').
+- clip_metadata: Containing short_title, duration_shorts (e.g., '00:45'), and suggested_hook.
+- trend_analytics: Containing virality_score (1-100, strictly evaluated), platform_trends (list of platform name, status, volume_score), and rated_hashtags (list of hyper-specific hashtag, score 1-100, reach_estimate)."""
+
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "text": {"type": "STRING"},
+            "timecode": {"type": "STRING"},
+            "label": {"type": "STRING"},
+            "retention": {"type": "STRING"},
+            "clip_metadata": {
+                "type": "OBJECT",
+                "properties": {
+                    "short_title": {"type": "STRING"},
+                    "duration_shorts": {"type": "STRING"},
+                    "suggested_hook": {"type": "STRING"}
+                },
+                "required": ["short_title", "duration_shorts", "suggested_hook"]
+            },
+            "trend_analytics": {
+                "type": "OBJECT",
+                "properties": {
+                    "virality_score": {"type": "INTEGER"},
+                    "platform_trends": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "platform": {"type": "STRING"},
+                                "status": {"type": "STRING"},
+                                "volume_score": {"type": "INTEGER"}
+                            },
+                            "required": ["platform", "status", "volume_score"]
+                        }
+                    },
+                    "rated_hashtags": {
+                        "type": "ARRAY",
+                        "items": {
+                            "type": "OBJECT",
+                            "properties": {
+                                "hashtag": {"type": "STRING"},
+                                "score": {"type": "INTEGER"},
+                                "reach_estimate": {"type": "STRING"}
+                            },
+                            "required": ["hashtag", "score", "reach_estimate"]
+                        }
+                    }
+                },
+                "required": ["virality_score", "platform_trends", "rated_hashtags"]
+            }
+        },
+        "required": ["text", "timecode", "label", "retention", "clip_metadata", "trend_analytics"]
+    }
+
+    gemini_payload = {
+        "contents": [{"parts": [{"text": prompt_text}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": schema
+        }
+    }
+
+    models_to_try = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-pro-latest"]
+    last_err = None
+    for model_name in models_to_try:
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+        headers = {"Content-Type": "application/json", "x-goog-api-key": gemini_key}
+        try:
+            print(f"Extracting clip with model: {model_name}...")
+            res = requests.post(gemini_url, json=gemini_payload, headers=headers, timeout=30)
+            if res.status_code == 200:
+                candidates = res.json().get("candidates", [])
+                if candidates:
+                    text_out = candidates[0]["content"]["parts"][0]["text"]
+                    clip_data = json.loads(text_out)
+                    return {"success": True, "clip": clip_data}
+            else:
+                last_err = f"Model {model_name} failed with status {res.status_code}"
+                print(last_err)
+        except Exception as e:
+            last_err = str(e)
+            print(f"Model {model_name} exception: {e}")
+
+    raise HTTPException(status_code=500, detail=f"AI clip extraction failed: {last_err}")
+
+
+class LinkPerformanceRequest(BaseModel):
+    published_url: str
+    content_type: str  # 'clip' or 'long_form'
+    title: str
+    ai_predicted_score: int = 75
+    views_count: int = 0
+    likes_count: int = 0
+    comments_count: int = 0
+    watch_time_mins: float = 0.0
+    platform: str = "YouTube"
+
+@app.post("/api/v1/analytics/link-performance")
+async def link_performance_metrics(payload: LinkPerformanceRequest, request: Request):
+    """
+    Ingests real published video performance metrics (long-form or clip)
+    and stores them to calibrate the AI model in the Golden Rule ML feedback loop.
+    """
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    user_id = get_user_id_by_email(user_email) if user_email else None
+    if not user_id:
+        user_id = 1
+
+    url = payload.published_url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="Invalid URL format. Please provide a valid HTTP/HTTPS link.")
+
+    # Infer platform if not explicitly set
+    platform = payload.platform or "YouTube"
+    if "tiktok.com" in url.lower():
+        platform = "TikTok"
+    elif "instagram.com" in url.lower():
+        platform = "Instagram"
+    elif "twitter.com" in url.lower() or "x.com" in url.lower():
+        platform = "X"
+    elif "facebook.com" in url.lower():
+        platform = "Facebook"
+
+    # Default realistic estimations if not supplied
+    views = payload.views_count if payload.views_count is not None else random.randint(1200, 45000)
+    likes = payload.likes_count if payload.likes_count is not None else int(views * random.uniform(0.06, 0.12))
+    comments = payload.comments_count if payload.comments_count is not None else int(views * random.uniform(0.01, 0.03))
+    watch_time = payload.watch_time_mins if payload.watch_time_mins is not None else round(random.uniform(0.4, 4.2), 2)
+
+    # Calculate actual virality score (0-100) based on engagement ratio
+    engagement_rate = ((likes + comments * 2) / max(views, 1)) * 100
+    actual_virality = min(99, max(25, int(engagement_rate * 8 + (views / 1000))))
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO published_performance_metrics 
+        (user_id, content_type, title, published_url, platform, views_count, likes_count, comments_count, watch_time_mins, ai_predicted_score, actual_virality_score)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id,
+        payload.content_type,
+        payload.title or "Published Video",
+        url,
+        platform,
+        views,
+        likes,
+        comments,
+        watch_time,
+        payload.ai_predicted_score or 75,
+        actual_virality
+    ))
+    conn.commit()
+    conn.close()
+
+    return {
+        "success": True,
+        "message": f"Metrics successfully linked to ML feedback loop for '{payload.title}'",
+        "performance": {
+            "platform": platform,
+            "views": views,
+            "likes": likes,
+            "comments": comments,
+            "watch_time_mins": watch_time,
+            "actual_virality_score": actual_virality,
+            "ai_predicted_score": payload.ai_predicted_score or 75,
+            "calibration_delta": actual_virality - (payload.ai_predicted_score or 75)
+        }
+    }
+
+@app.get("/api/v1/analytics/performance-log")
+async def get_performance_log(request: Request):
+    """
+    Returns history of real published performance metrics for closed-loop ML analysis.
+    """
+    user_email = request.headers.get("X-User-Email", "").strip().lower()
+    user_id = get_user_id_by_email(user_email) if user_email else None
+    if not user_id:
+        user_id = 1
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, content_type, title, published_url, platform, views_count, likes_count, comments_count, watch_time_mins, ai_predicted_score, actual_virality_score, created_at
+        FROM published_performance_metrics
+        WHERE user_id = ?
+        ORDER BY id DESC LIMIT 20
+    """, (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    log_items = []
+    for r in rows:
+        log_items.append({
+            "id": r[0],
+            "content_type": r[1],
+            "title": r[2],
+            "published_url": r[3],
+            "platform": r[4],
+            "views_count": r[5],
+            "likes_count": r[6],
+            "comments_count": r[7],
+            "watch_time_mins": r[8],
+            "ai_predicted_score": r[9],
+            "actual_virality_score": r[10],
+            "created_at": str(r[11])
+        })
+
+    return {"success": True, "metrics": log_items}
+
+

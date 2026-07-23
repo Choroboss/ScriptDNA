@@ -5,6 +5,8 @@ import { DashboardView } from './components/DashboardView';
 import { MyScriptsView } from './components/MyScriptsView';
 import { StyleAiTrainingView } from './components/StyleAiTrainingView';
 import { SettingsView } from './components/SettingsView';
+import { RetentionRulesView } from './components/RetentionRulesView';
+import { RealMetricsAnalyticsView } from './components/RealMetricsAnalyticsView';
 import { fetchVoiceProfile, fetchTrainingSources } from './services/api';
 import type { TrainingSource } from './services/api';
 
@@ -172,9 +174,18 @@ function App() {
           />
         )}
 
+        {activeView === 'real-metrics' && <RealMetricsAnalyticsView />}
+
         {activeView === 'settings' && (
           <SettingsView
             isAuthenticated={!!auth.user}
+          />
+        )}
+
+        {activeView === 'retention-rules' && (
+          <RetentionRulesView
+            isAuthenticated={!!auth.user}
+            onOpenAuthModal={() => setAuth((prev) => ({ ...prev, modalOpen: true }))}
           />
         )}
       </div>

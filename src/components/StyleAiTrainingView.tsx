@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { uploadScriptFile, ingestYouTubeUrl, fetchVoiceProfile } from '../services/api';
+import { uploadScriptFile, ingestYouTubeUrl, fetchVoiceProfile, deleteTrainingSource } from '../services/api';
 import type { TrainingSource } from '../services/api';
 
 interface StyleAiTrainingViewProps {
@@ -304,30 +304,70 @@ export const StyleAiTrainingView: React.FC<StyleAiTrainingViewProps> = ({
                   <tr className="bg-surface-container-high border-b border-outline-variant">
                     <th className="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Source Name</th>
                     <th className="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Status</th>
-                    <th className="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Metrics</th>
+                    <th className="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider">Metrics</th>
+                    <th className="px-6 py-4 font-label-md text-label-md text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant">
-                  {sources.map((source) => (
-                    <tr key={source.id} className="hover:bg-surface-container-high/50 transition-colors">
-                      <td className="px-6 py-4 text-on-surface flex items-center gap-3">
-                        <span className="material-symbols-outlined text-on-surface-variant text-sm">
-                          {source.type === 'file' ? 'description' : 'play_circle'}
-                        </span>
-                        <span className="truncate max-w-md">{source.name}</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 text-[10px] font-bold rounded border uppercase ${
-                          source.status === 'Indexed' 
-                            ? 'bg-green-900/20 text-green-400 border-green-500/30' 
-                            : 'bg-indigo-900/20 text-indigo-400 border-indigo-500/30 animate-pulse-indigo'
-                        }`}>
-                          {source.status === 'Indexed' ? 'Indexed' : `Processing ${source.progress || 0}%`}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right text-on-surface-variant text-label-md">{source.metrics}</td>
-                    </tr>
-                  ))}
+                  {sources.map((source) => {
+                    const isFailed = source.name.startsWith('Ingestion Failed') || source.metrics.includes('failed');
+                    return (
+                      <tr key={source.id} className="hover:bg-surface-container-high/50 transition-colors">
+                        <td className="px-6 py-4 text-on-surface flex items-center gap-3">
+                          <span className="material-symbols-outlined text-on-surface-variant text-sm">
+                            {source.type === 'file' ? 'description' : 'play_circle'}
+                          </span>
+                          <span className="truncate max-w-xs">{source.name}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-1 text-[10px] font-bold rounded border uppercase ${
+                            isFailed
+                              ? 'bg-red-900/20 text-red-400 border-red-500/30'
+                              : source.status === 'Indexed' 
+                              ? 'bg-green-900/20 text-green-400 border-green-500/30' 
+                              : 'bg-indigo-900/20 text-indigo-400 border-indigo-500/30 animate-pulse-indigo'
+                          }`}>
+                            {isFailed ? 'Failed' : source.status === 'Indexed' ? 'Indexed' : `Processing ${source.progress || 0}%`}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-on-surface-variant text-label-md">{source.metrics}</td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {isFailed && (
+                              <button
+                                onClick={() => {
+                                  const urlMatch = source.name.match(/https?:\/\/[^\s]+/);
+                                  if (urlMatch) {
+                                    setYoutubeUrl(urlMatch[0]);
+                                  } else {
+                                    fileInputRef.current?.click();
+                                  }
+                                }}
+                                className="px-2 py-1 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 rounded text-[10px] font-bold flex items-center gap-1 transition-all"
+                                title="Retry Ingestion"
+                              >
+                                <span className="material-symbols-outlined text-xs">refresh</span> Re-upload
+                              </button>
+                            )}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await deleteTrainingSource(source.id);
+                                  onRefreshTrainingSources?.();
+                                } catch (e) {
+                                  console.error('Failed to delete source', e);
+                                }
+                              }}
+                              className="px-2 py-1 bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 rounded text-[10px] font-bold flex items-center gap-1 transition-all"
+                              title="Delete Source"
+                            >
+                              <span className="material-symbols-outlined text-xs">delete</span> Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
