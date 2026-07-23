@@ -1107,9 +1107,9 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                             </span>
                           </div>
 
-                          {/* Direct AI Rendered Image */}
+                          {/* Direct AI Rendered Image with High-CTR 3D Text Overlay Badge */}
                           {opt.image_url && (
-                            <div className="relative rounded-lg overflow-hidden border border-[#3f3f46] aspect-video bg-[#0a0a0a] group">
+                            <div className="relative rounded-lg overflow-hidden border border-[#3f3f46] aspect-video bg-[#0a0a0a] group select-none shadow-2xl">
                               <img
                                 src={opt.image_url}
                                 alt={opt.concept_name}
@@ -1119,8 +1119,16 @@ export const MyScriptsView: React.FC<MyScriptsViewProps> = ({ voiceProfile, isAu
                                   (e.target as HTMLImageElement).src = `https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1280&auto=format&fit=crop`;
                                 }}
                               />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <span className="text-xs text-white font-mono font-bold">{opt.overlay_text_suggestion}</span>
+
+                              {/* Prominent YouTube 3D Text Overlay Badge */}
+                              <div className="absolute top-4 left-4 z-10 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-black font-black text-lg md:text-xl font-mono uppercase tracking-tight px-3 py-1.5 rounded-md border-2 border-black shadow-[0_4px_20px_rgba(0,0,0,0.9)] transform -rotate-2 group-hover:rotate-0 transition-transform">
+                                {thumbOverlayText.trim() || opt.overlay_text_suggestion}
+                              </div>
+
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-transparent to-transparent flex items-end p-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <span className="text-xs text-white font-mono font-bold">
+                                  {opt.concept_name} — CTR Optimization Active
+                                </span>
                               </div>
                             </div>
                           )}

@@ -1732,7 +1732,7 @@ async def generate_thumbnail_studio(payload: GenerateThumbnailRequest, request: 
     overlay_text = payload.overlay_text.strip() if payload.overlay_text else title
 
     prompt_text = f"""You are a world-class YouTube Thumbnail Designer & Prompt Engineer.
-Generate 3 distinct, high-CTR YouTube thumbnail visual concepts and Midjourney image prompts based on these creator inputs:
+Generate 3 distinct, high-CTR YouTube thumbnail visual concepts and Flux/Midjourney image prompts based on these creator inputs:
 
 - SCRIPT TITLE: {title}
 - USER'S CORE CONCEPT: {user_idea}
@@ -1740,10 +1740,15 @@ Generate 3 distinct, high-CTR YouTube thumbnail visual concepts and Midjourney i
 - BACKGROUND & ENVIRONMENT: {bg_idea}
 - OVERLAY TEXT ON THUMBNAIL: "{overlay_text}"
 
+CRITICAL THUMBNAIL COMPOSITION RULES:
+1. EMBED 3D TEXT OVERLAY: The prompt MUST explicitly describe huge, bold, 3D typography rendering the text "{overlay_text}" in glowing yellow, cyan, or metallic gold with black drop-shadows across the top or left third of the image.
+2. COMPOSITION BREATHING ROOM: Position main subjects on the right or center 60% of the image, keeping the top/left area uncluttered so text is 100% legible.
+3. NICHE CUMBIA & GAMING ACCENTS: Incorporate tropical cumbia music accents (accordions, keyboards, tropical neon lights) mixed with gaming elements.
+
 Return a JSON object matching the requested schema with:
 - options: Array of 3 concepts, each with:
-  - concept_name: Short name of the style (e.g. 'Dramatic High-Contrast', 'Hyper-Real 3D', 'Cinematic Dark')
-  - midjourney_prompt: Ready-to-use Midjourney/DALL-E prompt with 16:9 ratio and --v 6.0
+  - concept_name: Short name of the style (e.g. '3D Neon Typography', 'Dramatic High-Contrast', 'Hyper-Real Cumbia Hero')
+  - midjourney_prompt: Ready-to-use Midjourney/DALL-E prompt with 16:9 ratio and embedded text
   - overlay_text_suggestion: Short punchy text (1-4 words max) to render on the image
   - ctr_boost_reason: Brief explanation of why this visual triggers human curiosity."""
 
